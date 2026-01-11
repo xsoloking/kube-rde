@@ -132,10 +132,12 @@ func handleHealthz(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
+	if err := json.NewEncoder(w).Encode(map[string]string{
 		"status":  "ok",
 		"service": "kuberde-operator",
-	})
+	}); err != nil {
+		log.Printf("Failed to encode healthz response: %v", err)
+	}
 }
 
 // handleReadyz handles readiness probe (checks if operator is ready to reconcile)
@@ -149,10 +151,12 @@ func handleReadyz(w http.ResponseWriter, r *http.Request, controller *Controller
 	if controller.informer != nil && !controller.informer.HasSynced() {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(map[string]string{
+		if err := json.NewEncoder(w).Encode(map[string]string{
 			"status": "not ready",
 			"reason": "informer not synced",
-		})
+		}); err != nil {
+			log.Printf("Failed to encode readyz response: %v", err)
+		}
 		return
 	}
 
@@ -169,10 +173,12 @@ func handleReadyz(w http.ResponseWriter, r *http.Request, controller *Controller
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
-			json.NewEncoder(w).Encode(map[string]string{
+			if err := json.NewEncoder(w).Encode(map[string]string{
 				"status": "not ready",
 				"reason": "kubernetes client not accessible",
-			})
+			}); err != nil {
+				log.Printf("Failed to encode readyz response: %v", err)
+			}
 			return
 		}
 	}
@@ -180,10 +186,12 @@ func handleReadyz(w http.ResponseWriter, r *http.Request, controller *Controller
 	// All checks passed
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
+	if err := json.NewEncoder(w).Encode(map[string]string{
 		"status":  "ready",
 		"service": "kuberde-operator",
-	})
+	}); err != nil {
+		log.Printf("Failed to encode readyz response: %v", err)
+	}
 }
 
 func (c *Controller) onAdd(obj interface{}) {
