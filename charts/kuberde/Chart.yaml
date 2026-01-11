@@ -1,0 +1,20 @@
+apiVersion: v2
+name: kuberde
+description: A Helm chart for KubeRDE - Kubernetes Remote Development Environment
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - kubernetes
+  - development
+  - remote
+  - workspace
+  - devops
+home: https://github.com/xsoloking/kube-rde
+sources:
+  - https://github.com/xsoloking/kube-rde
+maintainers:
+  - name: KubeRDE Team
+    email: maintainers@kuberde.io
+icon: https://raw.githubusercontent.com/xsoloking/kube-rde/main/docs/images/logo.png
+dependencies: []

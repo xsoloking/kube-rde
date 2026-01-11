@@ -1,0 +1,193 @@
+# KubeRDE Ingress Configuration Examples
+# Choose ONE of the examples below based on your domain setup
+
+# ============================================================================
+# Option 1: Single Domain with Path Prefix (Simplest)
+# ============================================================================
+# Use this if you have one domain and want to use path-based routing
+# Example: kuberde.com for main UI, kuberde.com/auth for Keycloak
+#
+# Prerequisites:
+# - DNS: kuberde.com and *.kuberde.com pointing to Ingress IP
+# - Environment variables:
+#   KUBERDE_PUBLIC_URL=https://kuberde.com
+#   KUBERDE_AGENT_DOMAIN=kuberde.com
+#   KEYCLOAK_URL=https://kuberde.com/auth
+#   KEYCLOAK_PUBLIC_URL=https://kuberde.com/auth
+#
+# - Update Keycloak deployment with:
+#   env:
+#   - name: KC_HTTP_RELATIVE_PATH
+#     value: "/auth"
+#   - name: KC_HOSTNAME
+#     value: "kuberde.com"
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kuberde-ingress-single-domain
+  namespace: kuberde
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    # Rewrite /auth/* to /* for Keycloak
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - kuberde.com
+    - "*.kuberde.com"
+    secretName: kuberde-tls
+  rules:
+  # Main domain - serves both UI and Keycloak
+  - host: kuberde.com
+    http:
+      paths:
+      # Keycloak at /auth path
+      - path: /auth(/|$)(.*)
+        pathType: Prefix
+        backend:
+          service:
+            name: keycloak
+            port:
+              number: 8080
+      # Main UI and API (must be last to catch all other paths)
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kuberde-server
+            port:
+              number: 8080
+  # Wildcard for agent subdomains (e.g., user-alice-dev.kuberde.com)
+  - host: "*.kuberde.com"
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kuberde-server
+            port:
+              number: 8080
+
+---
+# ============================================================================
+# Option 2: Subdomain-based (Production Recommended)
+# ============================================================================
+# Use this if you want separate subdomains for each service
+# Example: kuberde.com for main UI, sso.kuberde.com for Keycloak
+#
+# Prerequisites:
+# - DNS: kuberde.com, *.kuberde.com, sso.kuberde.com pointing to Ingress IP
+# - Environment variables:
+#   KUBERDE_PUBLIC_URL=https://kuberde.com
+#   KUBERDE_AGENT_DOMAIN=kuberde.com
+#   KEYCLOAK_URL=https://sso.kuberde.com
+#   KEYCLOAK_PUBLIC_URL=https://sso.kuberde.com
+#
+# - Update Keycloak deployment with:
+#   env:
+#   - name: KC_HOSTNAME
+#     value: "sso.kuberde.com"
+#   - name: KC_PROXY
+#     value: "edge"
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kuberde-ingress-subdomain
+  namespace: kuberde
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - kuberde.com
+    - "*.kuberde.com"
+    - sso.kuberde.com
+    secretName: kuberde-tls
+  rules:
+  # Main domain - UI and API
+  - host: kuberde.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kuberde-server
+            port:
+              number: 8080
+  # Wildcard for agent subdomains
+  - host: "*.kuberde.com"
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kuberde-server
+            port:
+              number: 8080
+  # Keycloak on separate subdomain
+  - host: sso.kuberde.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: keycloak
+            port:
+              number: 8080
+
+---
+# ============================================================================
+# ClusterIssuer for cert-manager (Let's Encrypt)
+# ============================================================================
+# This is required if you're using cert-manager for automatic TLS certificates
+# Install cert-manager first:
+# kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: admin@kuberde.com  # CHANGE THIS to your email
+    privateKeySecretRef:
+      name: letsencrypt-prod
+    solvers:
+    - http01:
+        ingress:
+          class: nginx
+
+---
+# ============================================================================
+# ClusterIssuer for Let's Encrypt Staging (for testing)
+# ============================================================================
+# Use this for testing to avoid rate limits
+# Change annotation to: cert-manager.io/cluster-issuer: letsencrypt-staging
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: admin@kuberde.com  # CHANGE THIS to your email
+    privateKeySecretRef:
+      name: letsencrypt-staging
+    solvers:
+    - http01:
+        ingress:
+          class: nginx

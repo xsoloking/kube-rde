@@ -1,0 +1,190 @@
+# ============================================================================
+# Local Development Values for KubeRDE
+# ============================================================================
+# This values file is optimized for local development using:
+# - nip.io for automatic wildcard DNS (no DNS configuration needed)
+# - HTTP protocol (no TLS/certificates needed)
+# - k3d or kind clusters
+#
+# Usage:
+#   helm install kuberde ./charts/kuberde -f charts/kuberde/values-local-dev.yaml
+#
+# Access URLs:
+#   - Main: http://192.168.97.2.nip.io
+#   - SSO: http://sso.192.168.97.2.nip.io
+#   - Agents: http://*.192.168.97.2.nip.io
+# ============================================================================
+
+# Global Configuration
+global:
+  # nip.io domains (automatically resolves to 127.0.0.1)
+  domain: 192.168.97.2.nip.io
+  keycloakDomain: sso.192.168.97.2.nip.io
+  agentDomain: 192.168.97.2.nip.io
+
+  # HTTP protocol for local development
+  protocol: http
+
+# Image Configuration
+image:
+  repository: soloking
+  pullPolicy: Always
+  tag: latest
+
+# Server
+server:
+  enabled: true
+  replicaCount: 1
+
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+  env:
+    LOG_LEVEL: DEBUG  # Verbose logging for development
+
+# Operator
+operator:
+  enabled: true
+  replicaCount: 1
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+  env:
+    LOG_LEVEL: DEBUG
+
+# Web UI
+web:
+  enabled: true
+  replicaCount: 1
+
+  resources:
+    limits:
+      cpu: 100m
+      memory: 128Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+
+# Keycloak
+keycloak:
+  enabled: true
+  replicaCount: 1
+
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+
+  # HTTP configuration for local dev
+  hostname:
+    strict: false  # Allow flexible hostname
+    strictHttps: false
+    httpEnabled: true
+    strictBackchannel: false
+
+# PostgreSQL
+postgresql:
+  enabled: true
+  replicaCount: 1
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+  # Persistence
+  persistence:
+    enabled: true
+    storageClass: ""  # Use cluster default
+    size: 1Gi  # Smaller for local dev
+
+# Ingress Configuration
+ingress:
+  enabled: true
+  className: traefik
+
+  # Middleware for HTTP headers
+  middleware:
+    enabled: true
+    name: force-http-headers
+
+  main:
+    annotations:
+      kubernetes.io/ingress.class: traefik
+      # web for HTTP, websecure for HTTPS
+      traefik.ingress.kubernetes.io/router.entrypoints: web
+      traefik.ingress.kubernetes.io/router.priority: "50"
+    tls:
+      enabled: false
+    # Wildcard routing for agents
+    wildcard:
+      enabled: true
+
+  keycloak:
+    annotations:
+      kubernetes.io/ingress.class: traefik
+      # web for HTTP, websecure for HTTPS
+      traefik.ingress.kubernetes.io/router.entrypoints: web
+      traefik.ingress.kubernetes.io/router.priority: "100"
+    tls:
+      enabled: false
+
+# Secrets Configuration
+secrets:
+  create: true
+
+  # Simple passwords for local development
+  keycloak:
+    adminUser: admin
+    adminPassword: password
+    realm:
+      kuberde:
+        username: admin
+        password: password
+
+  database:
+    user: kuberde
+    password: kuberde  # Simple password for dev
+    name: kuberde
+
+  keycloakClients:
+    serverClientSecret: dev-server-secret
+    agentClientSecret: dev-agent-secret
+
+  # GitHub OAuth (optional for local dev)
+  github:
+    enabled: false
+    clientId: ""
+    clientSecret: ""
+
+# CRDs
+crds:
+  install: true
+  keep: true
+
+# Disable production features
+serviceMonitor:
+  enabled: false
+
+podSecurityPolicy:
+  enabled: false
+
+networkPolicy:
+  enabled: false

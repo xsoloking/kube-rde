@@ -1,0 +1,16 @@
+{{- if and .Values.ingress.enabled .Values.ingress.middleware.enabled }}
+---
+# Traefik Middleware to force HTTP protocol in forwarded headers
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ include "kuberde.fullname" . }}-force-http-headers
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kuberde.labels" . | nindent 4 }}
+spec:
+  headers:
+    customRequestHeaders:
+      X-Forwarded-Proto: "http"
+      X-Forwarded-Port: "80"
+{{- end }}

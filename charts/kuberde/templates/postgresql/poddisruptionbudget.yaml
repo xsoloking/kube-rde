@@ -1,0 +1,21 @@
+{{- if .Values.postgresql.enabled }}
+{{- if .Values.postgresql.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "kuberde.fullname" . }}-postgresql-pdb
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kuberde.postgresql.labels" . | nindent 4 }}
+spec:
+  {{- if .Values.postgresql.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ .Values.postgresql.podDisruptionBudget.minAvailable }}
+  {{- end }}
+  {{- if .Values.postgresql.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ .Values.postgresql.podDisruptionBudget.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "kuberde.postgresql.selectorLabels" . | nindent 6 }}
+{{- end }}
+{{- end }}

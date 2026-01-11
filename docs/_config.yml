@@ -1,0 +1,151 @@
+# Jekyll configuration for GitHub Pages
+# Documentation: https://jekyllrb.com/docs/configuration/
+
+# Site settings
+title: KubeRDE Documentation
+description: Kubernetes-native Remote Development Environments - Secure, scalable development workspaces accessible from anywhere
+baseurl: "" # the subpath of your site, e.g. /blog
+url: "" # the base hostname & protocol for your site
+
+# Repository
+repository: xsoloking/kube-rde
+github_username: xsoloking
+
+# Social
+twitter_username: kuberde
+linkedin_username: kuberde
+
+# Build settings
+theme: just-the-docs
+# Alternative themes:
+# theme: minima
+# theme: jekyll-theme-cayman
+# remote_theme: just-the-docs/just-the-docs
+
+# Plugins
+plugins:
+  - jekyll-feed
+  - jekyll-seo-tag
+  - jekyll-sitemap
+  - jekyll-github-metadata
+  - jekyll-relative-links
+
+# Exclude from processing
+exclude:
+  - .gitignore
+  - README.md
+  - Gemfile
+  - Gemfile.lock
+  - node_modules
+  - vendor
+  - .sass-cache
+  - .jekyll-cache
+
+# Markdown settings
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+  syntax_highlighter_opts:
+    block:
+      line_numbers: false
+
+# Mermaid diagrams support
+mermaid:
+  version: "9.3.0"
+
+# Just the Docs theme settings (if using just-the-docs)
+# Logo
+logo: "/assets/images/kuberde-logo.png"
+
+# Aux links for the upper right navigation
+aux_links:
+  "KubeRDE on GitHub":
+    - "https://github.com/xsoloking/kube-rde"
+
+# Back to top link
+back_to_top: true
+back_to_top_text: "Back to top"
+
+# Footer content
+footer_content: 'Copyright &copy; 2026 KubeRDE. Distributed under the <a href="https://github.com/xsoloking/kube-rde/blob/main/LICENSE">MIT License</a>.'
+
+# Color scheme
+color_scheme: light # or dark, or custom
+
+# Search
+search_enabled: true
+search:
+  heading_level: 2
+  previews: 3
+  preview_words_before: 5
+  preview_words_after: 10
+  tokenizer_separator: /[\s/]+/
+  rel_url: true
+  button: false
+
+# Navigation structure
+nav_sort: case_insensitive
+
+# Collection for tutorials
+collections:
+  tutorials:
+    output: true
+    permalink: /:collection/:name
+
+# Default front matter
+defaults:
+  - scope:
+      path: ""
+      type: "pages"
+    values:
+      layout: "default"
+  - scope:
+      path: ""
+      type: "tutorials"
+    values:
+      layout: "default"
+      parent: "Tutorials"
+  - scope:
+      path: ""
+      type: "posts"
+    values:
+      layout: "post"
+
+# Google Analytics (optional)
+# google_analytics: UA-XXXXXXXXX-X
+
+# Enable emoji support
+emoji:
+  src: "https://github.githubassets.com/images/icons/emoji/"
+
+# Code snippet settings
+highlighter: rouge
+rouge:
+  css_class: 'highlight'
+
+# Timezone
+timezone: UTC
+
+# Pagination (for blog)
+paginate: 10
+paginate_path: "/blog/page:num/"
+
+# RSS feed
+feed:
+  path: blog/feed.xml
+
+# Sitemap
+sitemap:
+  file: "/sitemap.xml"
+
+# SEO
+lang: en_US
+title_separator: "|"
+
+# OpenGraph defaults
+defaults:
+  - scope:
+      path: ""
+    values:
+      image: /assets/images/og-image.png

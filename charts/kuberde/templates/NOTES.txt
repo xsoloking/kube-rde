@@ -1,0 +1,127 @@
+Thank you for installing {{ .Chart.Name }}!
+
+Your release is named {{ .Release.Name }}.
+
+{{- if .Values.ingress.enabled }}
+
+To access KubeRDE:
+
+{{- if .Values.ingress.main.tls.enabled }}
+  Web UI: https://{{ .Values.global.domain }}
+  Keycloak SSO: https://{{ .Values.global.keycloakDomain }}
+  Agents: https://*.{{ .Values.global.agentDomain }}
+{{- else }}
+  Web UI: http://{{ .Values.global.domain }}
+  Keycloak SSO: http://{{ .Values.global.keycloakDomain }}
+  Agents: http://*.{{ .Values.global.agentDomain }}
+{{- end }}
+
+{{- if .Values.ingress.main.tls.enabled }}
+
+TLS Configuration:
+{{- if .Values.ingress.main.tls.secretName }}
+  Using custom TLS secret: {{ .Values.ingress.main.tls.secretName }}
+{{- else }}
+  Using Traefik cert resolver (auto-generated certificates)
+  Note: Ensure your cert resolver "{{ .Values.ingress.main.annotations | default dict | dig "traefik.ingress.kubernetes.io/router.tls.certresolver" "letsencrypt" }}" is configured in Traefik
+{{- end }}
+
+Certificate provisioning may take 5-10 minutes for new domains.
+{{- end }}
+
+{{- if not (eq .Values.global.domain "127-0-0-1.nip.io") }}
+{{- if not (hasSuffix ".nip.io" .Values.global.domain) }}
+
+IMPORTANT: Make sure your DNS is configured:
+  {{ .Values.global.domain }} -> <your-ingress-ip>
+  {{ .Values.global.keycloakDomain }} -> <your-ingress-ip>
+  {{- if .Values.ingress.main.wildcard.enabled }}
+  *.{{ .Values.global.agentDomain }} -> <your-ingress-ip>
+  {{- end }}
+
+To get your Ingress IP:
+  kubectl get svc -n {{ .Values.ingress.className }} {{ .Values.ingress.className }}
+
+To check DNS propagation:
+  nslookup {{ .Values.global.domain }}
+{{- end }}
+{{- end }}
+
+{{- else }}
+
+To access KubeRDE without Ingress, use port-forward:
+
+  # Web UI
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "kuberde.fullname" . }}-web {{ .Values.web.service.port }}:{{ .Values.web.service.port }}
+  Then visit: http://localhost:{{ .Values.web.service.port }}
+
+  # Server API
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "kuberde.fullname" . }}-server {{ .Values.server.service.wsPort }}:{{ .Values.server.service.wsPort }}
+  Then visit: http://localhost:{{ .Values.server.service.wsPort }}/api
+
+{{- end }}
+
+Default Credentials:
+  Username: {{ .Values.secrets.keycloak.realm.kuberde.username }}
+  Password: {{ .Values.secrets.keycloak.realm.kuberde.password }}
+
+⚠️  SECURITY WARNING ⚠️
+{{- if eq .Values.secrets.keycloak.realm.kuberde.password "password" }}
+  You are using the default development password!
+  For production, update your values:
+    keycloak:
+      realm:
+        kuberde:
+          password: "your-strong-password"
+{{- end }}
+
+{{- if eq .Values.secrets.database.password "kuberde123" }}
+  You are using the default PostgreSQL password!
+  For production, update your values:
+    secrets:
+      database:
+        password: "your-strong-password"
+{{- end }}
+
+To check the deployment status:
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+To view server logs:
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=kuberde-server -f
+
+To view operator logs:
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=kuberde-operator -f
+
+To check ingress status:
+  kubectl get ingress -n {{ .Release.Namespace }}
+
+{{- if .Values.ingress.main.tls.enabled }}
+
+To check certificate status (if using Traefik cert resolver):
+  kubectl get certificate -n {{ .Release.Namespace }}
+{{- end }}
+
+Deployment Mode:
+{{- if .Values.ingress.main.tls.enabled }}
+  ✓ HTTPS mode enabled (production-ready with TLS)
+{{- end }}
+{{- if not .Values.ingress.main.tls.enabled }}
+  ✓ HTTP mode enabled (suitable for local development)
+{{- end }}
+{{- if not .Values.ingress.main.tls.enabled }}
+{{- if not .Values.ingress.main.tls.enabled }}
+  ⚠ No ingress mode enabled - using port-forward only
+{{- end }}
+{{- end }}
+
+Next Steps:
+  1. Wait for all pods to be running (may take 2-5 minutes)
+  2. Access the Web UI at the URL above
+  3. Login with the default credentials
+  4. Change the admin password in Keycloak
+  5. Create your first workspace!
+
+Documentation: https://github.com/xsoloking/kube-rde/tree/main/docs
+Need help? https://github.com/xsoloking/kube-rde/issues
+
+Happy developing with KubeRDE! 🚀

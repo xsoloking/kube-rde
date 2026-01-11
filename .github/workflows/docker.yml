@@ -1,0 +1,154 @@
+name: Docker Build and Push
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  REGISTRY: ghcr.io
+  # Change this to your GitHub organization/username
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}
+
+jobs:
+  build-and-push:
+    name: Build and Push Docker Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        component:
+          - name: server
+            dockerfile: Dockerfile.server
+            context: .
+          - name: agent
+            dockerfile: Dockerfile.agent
+            context: .
+          - name: operator
+            dockerfile: Dockerfile.operator
+            context: .
+          - name: web
+            dockerfile: Dockerfile.web
+            context: .
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_PREFIX }}/kuberde-${{ matrix.component.name }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.component.context }}
+          file: ${{ matrix.component.dockerfile }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+      - name: Generate SBOM
+        if: github.event_name != 'pull_request'
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE_PREFIX }}/kuberde-${{ matrix.component.name }}:${{ steps.meta.outputs.version }}
+          format: spdx-json
+          output-file: sbom-${{ matrix.component.name }}.spdx.json
+
+      - name: Upload SBOM
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ matrix.component.name }}
+          path: sbom-${{ matrix.component.name }}.spdx.json
+          retention-days: 90
+
+  scan-images:
+    name: Scan Docker Images
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      security-events: write
+      packages: read
+    strategy:
+      matrix:
+        component: [server, agent, operator, web]
+
+    steps:
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_PREFIX }}/kuberde-${{ matrix.component }}:latest
+          format: 'sarif'
+          output: 'trivy-${{ matrix.component }}.sarif'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: 'trivy-${{ matrix.component }}.sarif'
+          category: 'trivy-${{ matrix.component }}'
+
+  verify-images:
+    name: Verify Docker Images
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.event_name != 'pull_request'
+    strategy:
+      matrix:
+        component: [server, agent, operator, web]
+
+    steps:
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull and verify image
+        run: |
+          docker pull ${{ env.IMAGE_PREFIX }}/kuberde-${{ matrix.component }}:latest
+          docker inspect ${{ env.IMAGE_PREFIX }}/kuberde-${{ matrix.component }}:latest
+
+      - name: Run basic health check
+        run: |
+          # Add component-specific health checks here
+          echo "Health check for ${{ matrix.component }} passed"

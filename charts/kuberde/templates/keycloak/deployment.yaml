@@ -1,0 +1,87 @@
+{{- if .Values.keycloak.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kuberde.fullname" . }}-keycloak
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kuberde.keycloak.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.keycloak.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "kuberde.keycloak.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kuberde.keycloak.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+      - name: keycloak
+        image: {{ .Values.keycloak.image.repository }}:{{ .Values.keycloak.image.tag }}
+        imagePullPolicy: {{ .Values.keycloak.image.pullPolicy }}
+        {{- if .Values.keycloak.args }}
+        args:
+        {{- toYaml .Values.keycloak.args | nindent 8 }}
+        {{- end }}
+        env:
+        - name: KEYCLOAK_ADMIN
+          value: {{ .Values.secrets.keycloak.adminUser | quote }}
+        - name: KEYCLOAK_ADMIN_PASSWORD
+          value: {{ .Values.secrets.keycloak.adminPassword | quote }}
+        - name: KC_HOSTNAME
+          value: {{ .Values.global.keycloakDomain | quote }}
+        - name: KC_PROXY
+          value: "edge"
+        - name: KC_HOSTNAME_STRICT
+          value: {{ .Values.keycloak.hostname.strict | quote }}
+        - name: KC_HOSTNAME_STRICT_HTTPS
+          value: {{ .Values.keycloak.hostname.strictHttps | quote }}
+        - name: KC_HTTP_ENABLED
+          value: {{ .Values.keycloak.hostname.httpEnabled | quote }}
+        - name: KC_FRONTEND_URL
+          value: "{{ .Values.global.protocol }}://{{ .Values.global.keycloakDomain }}"
+        - name: KC_HOSTNAME_STRICT_BACKCHANNEL
+          value: {{ .Values.keycloak.hostname.strictBackchannel | quote }}
+        {{- with .Values.keycloak.env }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if .Values.keycloak.livenessProbe.enabled }}
+        livenessProbe:
+          httpGet:
+            path: {{ .Values.keycloak.livenessProbe.path }}
+            port: {{ .Values.keycloak.livenessProbe.port }}
+            scheme: HTTP
+          initialDelaySeconds: {{ .Values.keycloak.livenessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.keycloak.livenessProbe.periodSeconds }}
+          timeoutSeconds: {{ .Values.keycloak.livenessProbe.timeoutSeconds }}
+          failureThreshold: {{ .Values.keycloak.livenessProbe.failureThreshold }}
+        {{- end }}
+        {{- if .Values.keycloak.readinessProbe.enabled }}
+        readinessProbe:
+          httpGet:
+            path: {{ .Values.keycloak.readinessProbe.path }}
+            port: {{ .Values.keycloak.readinessProbe.port }}
+            scheme: HTTP
+          initialDelaySeconds: {{ .Values.keycloak.readinessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.keycloak.readinessProbe.periodSeconds }}
+          timeoutSeconds: {{ .Values.keycloak.readinessProbe.timeoutSeconds }}
+          failureThreshold: {{ .Values.keycloak.readinessProbe.failureThreshold }}
+        {{- end }}
+        volumeMounts:
+        - name: realm-config
+          mountPath: /opt/keycloak/data/import
+          readOnly: true
+        ports:
+        - containerPort: {{ .Values.keycloak.service.port }}
+          name: http
+          protocol: TCP
+        {{- with .Values.keycloak.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      volumes:
+      - name: realm-config
+        secret:
+          secretName: {{ .Values.secrets.existingSecrets.keycloakRealmSecret | default "keycloak-realm-secret" }}
+{{- end }}

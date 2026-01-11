@@ -1,0 +1,207 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: rdeagents.kuberde.io
+  annotations:
+    description: "RDEAgent defines a fast reverse proxy agent deployment"
+spec:
+  group: kuberde.io
+  scope: Namespaced
+  names:
+    plural: rdeagents
+    singular: rdeagent
+    kind: RDEAgent
+    shortNames:
+      - fa
+    categories:
+      - all
+      - frp
+
+  preserveUnknownFields: false
+
+  versions:
+    - name: v1beta1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              description: "RDEAgent specification"
+              required:
+                - serverUrl
+                - authSecret
+                - workloadContainer
+              properties:
+                serverUrl:
+                  type: string
+                  description: "URL of the FRP Server WebSocket endpoint (e.g., ws://server:8080/ws)"
+                  minLength: 1
+                owner:
+                  type: string
+                  description: "Username of the owner for multi-tenant setups. If set, Agent ID becomes user-{owner}-{name}"
+                authSecret:
+                  type: string
+                  description: "Name of the Secret containing AUTH_CLIENT_ID and AUTH_CLIENT_SECRET for authentication"
+                  minLength: 1
+                localTarget:
+                  type: string
+                  description: "The local target address to expose (e.g., 127.0.0.1:80, localhost:2222). If empty, derived from workloadContainer ports."
+                workloadContainer:
+                  type: object
+                  description: "The workload container specification (service being proxied)"
+                  required:
+                    - image
+                  properties:
+                    image:
+                      type: string
+                      description: "Container image URI"
+                      minLength: 1
+                    imagePullPolicy:
+                      type: string
+                      description: "Image pull policy"
+                      enum: ["Always", "Never", "IfNotPresent"]
+                      default: "IfNotPresent"
+                    command:
+                      type: array
+                      items:
+                        type: string
+                    args:
+                      type: array
+                      items:
+                        type: string
+                    ports:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          containerPort:
+                            type: integer
+                            minimum: 1
+                            maximum: 65535
+                          name:
+                            type: string
+                          protocol:
+                            type: string
+                            enum: ["TCP", "UDP"]
+                            default: "TCP"
+                    env:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - name
+                        properties:
+                          name:
+                            type: string
+                          value:
+                            type: string
+                    resources:
+                      type: object
+                      description: "Resource requirements (CPU, memory, GPU)"
+                      properties:
+                        requests:
+                          type: object
+                          x-kubernetes-preserve-unknown-fields: true
+                          description: "Resource requests (e.g. cpu: 100m, nvidia.com/gpu: 1)"
+                        limits:
+                          type: object
+                          x-kubernetes-preserve-unknown-fields: true
+                          description: "Resource limits (e.g. cpu: 200m, nvidia.com/gpu: 1)"
+                    volumeMounts:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - name
+                          - mountPath
+                        properties:
+                          name:
+                            type: string
+                          mountPath:
+                            type: string
+                          readOnly:
+                            type: boolean
+                    securityContext:
+                      type: object
+                      description: "Security context for the container (runAsUser, runAsGroup, fsGroup, etc.)"
+                      x-kubernetes-preserve-unknown-fields: true
+                storage:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - name
+                      - storageClass
+                      - size
+                      - mountPath
+                    properties:
+                      name:
+                        type: string
+                      storageClass:
+                        type: string
+                      size:
+                        type: string
+                      mountPath:
+                        type: string
+                nodeSelector:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                tolerations:
+                  type: array
+                  items:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                sshPublicKeys:
+                  type: array
+                  items:
+                    type: string
+                volumes:
+                  type: array
+                  description: "Volume definitions to be mounted in the pod"
+                  items:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                pvcName:
+                  type: string
+                  description: "Name of the PersistentVolumeClaim to use for workspace storage"
+                ttl:
+                  type: string
+                  description: "Idle timeout duration (e.g., 8h, 30m). Set '0' to disable."
+                  default: "0"
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                online:
+                  type: boolean
+                lastActivity:
+                  type: string
+                  format: date-time
+                podName:
+                  type: string
+                message:
+                  type: string
+
+      additionalPrinterColumns:
+        - name: Status
+          type: string
+          jsonPath: .status.phase
+        - name: Online
+          type: boolean
+          jsonPath: .status.online
+        - name: Pod
+          type: string
+          jsonPath: .status.podName
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+        - name: Message
+          type: string
+          jsonPath: .status.message
+          priority: 1

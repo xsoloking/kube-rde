@@ -1,0 +1,119 @@
+{{- if .Values.postgresql.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "kuberde.fullname" . }}-postgresql
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kuberde.postgresql.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "kuberde.fullname" . }}-postgresql
+  replicas: {{ .Values.postgresql.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "kuberde.postgresql.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kuberde.postgresql.selectorLabels" . | nindent 8 }}
+    spec:
+      securityContext:
+        fsGroup: 999  # PostgreSQL user ID
+        runAsNonRoot: true
+        runAsUser: 999
+      containers:
+      - name: postgresql
+        image: {{ .Values.postgresql.image.repository }}:{{ .Values.postgresql.image.tag }}
+        imagePullPolicy: {{ .Values.postgresql.image.pullPolicy }}
+        ports:
+        - name: postgresql
+          containerPort: {{ .Values.postgresql.service.port }}
+          protocol: TCP
+        env:
+        - name: POSTGRES_DB
+          value: {{ .Values.secrets.database.name | quote }}
+        - name: POSTGRES_USER
+          value: {{ .Values.secrets.database.user | quote }}
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.existingSecrets.postgresqlSecret | default "postgresql-secret" }}
+              key: POSTGRES_PASSWORD
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        {{- with .Values.postgresql.env }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- with .Values.postgresql.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- if .Values.postgresql.livenessProbe.enabled }}
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - pg_isready -U {{ .Values.secrets.database.user }} -d {{ .Values.secrets.database.name }}
+          initialDelaySeconds: {{ .Values.postgresql.livenessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.postgresql.livenessProbe.periodSeconds }}
+          timeoutSeconds: {{ .Values.postgresql.livenessProbe.timeoutSeconds }}
+          failureThreshold: {{ .Values.postgresql.livenessProbe.failureThreshold }}
+        {{- end }}
+        {{- if .Values.postgresql.readinessProbe.enabled }}
+        readinessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - pg_isready -U {{ .Values.secrets.database.user }} -d {{ .Values.secrets.database.name }}
+          initialDelaySeconds: {{ .Values.postgresql.readinessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.postgresql.readinessProbe.periodSeconds }}
+          timeoutSeconds: {{ .Values.postgresql.readinessProbe.timeoutSeconds }}
+          failureThreshold: {{ .Values.postgresql.readinessProbe.failureThreshold }}
+        {{- end }}
+        volumeMounts:
+        - name: postgresql-data
+          mountPath: /var/lib/postgresql/data
+        - name: postgresql-config
+          mountPath: /etc/postgresql/postgresql.conf
+          subPath: postgresql.conf
+          readOnly: true
+        - name: postgresql-runtime
+          mountPath: /var/run/postgresql
+        - name: postgresql-tmp
+          mountPath: /tmp
+        {{- with .Values.postgresql.containerSecurityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      volumes:
+      - name: postgresql-config
+        configMap:
+          name: {{ include "kuberde.fullname" . }}-postgresql-config
+          defaultMode: 0644
+      - name: postgresql-runtime
+        emptyDir: {}
+      - name: postgresql-tmp
+        emptyDir: {}
+  {{- if .Values.postgresql.persistence.enabled }}
+  volumeClaimTemplates:
+  - metadata:
+      name: postgresql-data
+      {{- with .Values.postgresql.persistence.annotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      accessModes:
+      {{- range .Values.postgresql.persistence.accessModes }}
+      - {{ . | quote }}
+      {{- end }}
+      {{- if .Values.postgresql.persistence.storageClass }}
+      storageClassName: {{ .Values.postgresql.persistence.storageClass | quote }}
+      {{- end }}
+      resources:
+        requests:
+          storage: {{ .Values.postgresql.persistence.size | quote }}
+  {{- end }}
+{{- end }}

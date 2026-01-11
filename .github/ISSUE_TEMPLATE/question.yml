@@ -1,0 +1,99 @@
+name: Question or Help
+description: Ask a question or get help with KubeRDE
+title: "[Question]: "
+labels: ["question", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have a question? We're here to help!
+
+        **Before asking:**
+        - Check our [documentation](https://github.com/xsoloking/kube-rde/tree/main/docs)
+        - Search [existing issues](https://github.com/xsoloking/kube-rde/issues)
+        - Review [discussions](https://github.com/xsoloking/kube-rde/discussions)
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your Question
+      description: What would you like to know?
+      placeholder: How do I...? / What is the recommended way to...? / Can KubeRDE...?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Question Category
+      description: Which area does your question relate to?
+      options:
+        - Installation and Setup
+        - Configuration
+        - Deployment (GCP/AWS/Azure/Local)
+        - Authentication and Security
+        - Resource Management and Quotas
+        - Networking and Ingress
+        - Monitoring and Logging
+        - Troubleshooting
+        - Best Practices
+        - Architecture and Design
+        - Development and Contributing
+        - Migration or Integration
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context and Background
+      description: |
+        Provide context about what you're trying to accomplish
+      placeholder: |
+        I'm trying to...
+        My goal is to...
+        I want to understand...
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: What Have You Tried?
+      description: What have you already attempted?
+      placeholder: |
+        1. I tried...
+        2. I read...
+        3. I searched for...
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment (if relevant)
+      description: Information about your setup
+      value: |
+        - KubeRDE Version: [e.g., v1.0.0]
+        - Kubernetes Platform: [e.g., GKE, EKS, AKS, local]
+        - Deployment Method: [e.g., Makefile, Helm, Terraform]
+      placeholder: Only fill this in if relevant to your question
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Information
+      description: Any other details that might help us answer your question
+      placeholder: Screenshots, logs, configuration snippets (remove sensitive data!)
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      description: Please confirm the following
+      options:
+        - label: I have searched the documentation
+          required: true
+        - label: I have searched existing issues and discussions
+          required: true
+        - label: This is not a bug report (use Bug Report template for bugs)
+          required: true

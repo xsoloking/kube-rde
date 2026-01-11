@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kuberde-web
+  namespace: ${NAMESPACE}
+  labels:
+    app: kuberde-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kuberde-web
+  template:
+    metadata:
+      labels:
+        app: kuberde-web
+    spec:
+      containers:
+      - name: web
+        image: soloking/kuberde-web:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 80
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 2
+          failureThreshold: 2
+        env:
+        - name: BACKEND_URL
+          value: "http://kuberde-server:8080"
+        - name: OIDC_AUTHORITY
+          value: "${KC_FRONTEND_URL}/realms/kuberde"
+        - name: OIDC_CLIENT_ID
+          value: "kuberde-cli"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kuberde-web
+  namespace: ${NAMESPACE}
+spec:
+  selector:
+    app: kuberde-web
+  ports:
+  - port: 80
+    targetPort: 80

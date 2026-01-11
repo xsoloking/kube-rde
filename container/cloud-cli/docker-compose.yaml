@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  claude-code-ui-sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: soloking/claude-code-ui:latest
+    container_name: claude-code-ui-sandbox
+    restart: unless-stopped
+    
+    ports:
+      - "3001:3001"
+    
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - LOG_LEVEL=info
+      - ENABLE_SSH=true
+      - USE_PM2=false
+      # API Keys
+      # - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-sk-ant-dummy-key-for-init}
+      # Git 配置
+      - GIT_USER_NAME=${GIT_USER_NAME:-Claude Code UI}
+      - GIT_USER_EMAIL=${GIT_USER_EMAIL:-claude@example.com}
+    
+    volumes:
+      # 持久化整个 root home 目录
+      - claude-sandbox-home://home/claudeui
+    
+    networks:
+      - claude-sandbox-network
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '8'
+    #       memory: 16G
+    #     reservations:
+    #       cpus: '4'
+    #       memory: 4G
+
+volumes:
+  claude-sandbox-home:
+    driver: local
+
+networks:
+  claude-sandbox-network:
+    driver: bridge

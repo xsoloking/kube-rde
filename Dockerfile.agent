@@ -1,0 +1,19 @@
+FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
+ARG TARGETOS
+ARG TARGETARCH
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY . .
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o agent cmd/agent/main.go
+
+# Run stage
+FROM alpine:latest
+WORKDIR /root/
+COPY --from=builder /app/agent .
+# Agent 启动时默认连接的环境变量，可以在 docker run 时覆盖
+ENV SERVER_URL=ws://server:8080/ws
+ENV LOCAL_TARGET=target-service:80
+CMD ["./agent"]

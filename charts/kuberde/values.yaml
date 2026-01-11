@@ -1,0 +1,524 @@
+# Default values for KubeRDE Helm Chart
+# This is a YAML-formatted file.
+
+# ============================================================================
+# Global Configuration
+# ============================================================================
+global:
+  # Domain Configuration
+  # For local dev with nip.io: 127-0-0-1.nip.io
+  # For production: frp.byai.uk
+  domain: kuberde.local
+
+  # Keycloak domain (SSO subdomain)
+  # For local dev: sso.127-0-0-1.nip.io
+  # For production: sso.byai.uk
+  keycloakDomain: sso.kuberde.local
+
+  # Protocol (http or https)
+  protocol: http
+
+  # Agent domain for wildcard routing
+  # Usually same as domain
+  agentDomain: kuberde.local
+
+  # Derived URLs (automatically constructed)
+  # publicUrl: "{{ .Values.global.protocol }}://{{ .Values.global.domain }}"
+  # keycloakUrl: "{{ .Values.global.protocol }}://{{ .Values.global.keycloakDomain }}"
+
+# ============================================================================
+# Image Configuration
+# ============================================================================
+image:
+  registry: ""  # Leave empty to use Docker Hub
+  repository: soloking  # Docker registry username/org
+  pullPolicy: IfNotPresent
+  tag: "latest"  # Overrides the image tag
+
+imagePullSecrets: []
+
+# ============================================================================
+# Server (KubeRDE Server)
+# ============================================================================
+server:
+  enabled: true
+  replicaCount: 1
+
+  image:
+    repository: kuberde-server
+    pullPolicy: IfNotPresent
+    tag: ""  # Defaults to global tag
+
+  service:
+    type: ClusterIP
+    port: 8080      # HTTP/WebSocket port (all traffic)
+    annotations: {}
+
+  # Resource limits
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+
+  # Health checks configuration
+  # Liveness probe - basic server health check
+  livenessProbe:
+    enabled: true
+    path: /healthz
+    port: 8080
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  # Readiness probe - checks DB and Keycloak connectivity
+  # Server will retry DB and Keycloak connection 3 times (5s interval each)
+  # Total retry time: ~15s, so initialDelay should be at least 20s
+  readinessProbe:
+    enabled: true
+    path: /readyz
+    port: 8080
+    initialDelaySeconds: 20  # Allow time for DB and Keycloak connection retries
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3  # Allow 3 failures before marking as not ready
+
+  # Environment variables
+  env:
+    LOG_LEVEL: INFO
+    # WebSocket URL that agents should connect to (internal cluster address)
+    # KUBERDE_AGENT_SERVER_URL: "ws://kuberde-server:8080/ws"
+    # Secret name containing agent authentication credentials
+    # KUBERDE_AGENT_AUTH_SECRET: "kuberde-agents-auth"
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+  podAnnotations: {}
+  podSecurityContext: {}
+  securityContext: {}
+
+  # Service Account
+  serviceAccount:
+    create: true
+    annotations: {}
+    name: kuberde-server
+
+  # RBAC
+  rbac:
+    create: true
+
+# ============================================================================
+# Operator (KubeRDE Operator)
+# ============================================================================
+operator:
+  enabled: true
+  replicaCount: 1
+
+  image:
+    repository: kuberde-operator
+    pullPolicy: IfNotPresent
+    tag: ""
+
+  # Resource limits
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+  # Health checks configuration
+  livenessProbe:
+    enabled: true
+    path: /healthz
+    port: 8080
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    enabled: true
+    path: /readyz
+    port: 8080
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 2
+
+  env:
+    LOG_LEVEL: INFO
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+  podAnnotations: {}
+
+  podSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    fsGroup: 65532
+
+  # Service Account
+  serviceAccount:
+    create: true
+    annotations: {}
+    name: kuberde-operator
+
+  # RBAC
+  rbac:
+    create: true
+
+# ============================================================================
+# Web UI
+# ============================================================================
+web:
+  enabled: true
+  replicaCount: 1
+
+  image:
+    repository: kuberde-web
+    pullPolicy: IfNotPresent
+    tag: ""
+
+  service:
+    type: ClusterIP
+    port: 80
+    annotations: {}
+
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+  # Health checks configuration
+  livenessProbe:
+    enabled: true
+    path: /healthz
+    port: 80
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  readinessProbe:
+    enabled: true
+    path: /readyz
+    port: 80
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 2
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+  podAnnotations: {}
+  podSecurityContext: {}
+  securityContext: {}
+
+# ============================================================================
+# Keycloak (Identity Provider)
+# ============================================================================
+keycloak:
+  enabled: true
+  replicaCount: 1
+
+  image:
+    repository: quay.io/keycloak/keycloak
+    pullPolicy: IfNotPresent
+    tag: "23.0.0"
+
+  args: ["start-dev", "--import-realm", "--health-enabled=true"]
+
+  service:
+    type: ClusterIP
+    port: 8080
+    annotations: {}
+
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+
+  # Health checks configuration
+  livenessProbe:
+    enabled: true
+    path: /health/live
+    port: 8080
+    initialDelaySeconds: 120
+    periodSeconds: 15
+    timeoutSeconds: 5
+    failureThreshold: 5
+
+  readinessProbe:
+    enabled: true
+    path: /health/ready
+    port: 8080
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  # Keycloak hostname settings
+  hostname:
+    strict: true
+    strictHttps: false
+    httpEnabled: true
+    strictBackchannel: false
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+  podAnnotations: {}
+  podSecurityContext: {}
+  securityContext: {}
+
+# ============================================================================
+# PostgreSQL Database
+# ============================================================================
+postgresql:
+  enabled: true
+  replicaCount: 1
+
+  image:
+    repository: postgres
+    pullPolicy: IfNotPresent
+    tag: "14"
+
+  service:
+    type: ClusterIP
+    port: 5432
+    annotations: {}
+
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+
+  # Health checks configuration
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  # Persistence
+  persistence:
+    enabled: true
+    storageClass: ""  # Use default storage class
+    accessModes:
+      - ReadWriteOnce
+    size: 10Gi
+    annotations: {}
+
+  # PostgreSQL configuration
+  config:
+    maxConnections: 200
+    sharedBuffers: 256MB
+    effectiveCacheSize: 1GB
+    maintenanceWorkMem: 64MB
+    checkpointCompletionTarget: 0.9
+    walBuffers: 16MB
+    defaultStatisticsTarget: 100
+    randomPageCost: 1.1
+    effectiveIoConcurrency: 200
+    workMem: 1310kB
+    minWalSize: 4GB
+    maxWalSize: 16GB
+    maxWorkerProcesses: 4
+    maxParallelWorkersPerGather: 2
+    maxParallelWorkers: 4
+    maxParallelMaintenanceWorkers: 2
+
+  # Security contexts
+  podSecurityContext:
+    fsGroup: 999
+    runAsNonRoot: true
+    runAsUser: 999
+
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: true
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  podAnnotations: {}
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  securityContext: {}
+
+# ============================================================================
+# Ingress Configuration
+# ============================================================================
+ingress:
+  enabled: true
+
+  # Ingress class: traefik or nginx
+  className: traefik
+
+  # Middleware for HTTP headers
+  middleware:
+    enabled: true
+    name: force-http-headers
+
+  main:
+    # annotations:
+    #   # web for HTTP, websecure for HTTPS
+    #   traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    #   # certresolver for Let's Encrypt
+    #   traefik.ingress.kubernetes.io/router.tls.certresolver: letsencrypt
+    #   traefik.ingress.kubernetes.io/router.priority: "50"
+    #   # external-dns annotations (optional)
+    #   external-dns.alpha.kubernetes.io/hostname: ""
+    #   external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+    # # TLS configuration
+    tls:
+      enabled: false
+      secretName: ""  # Auto-generated if empty
+
+    # Wildcard routing for agents
+    wildcard:
+      enabled: true
+
+  keycloak:
+    # annotations:
+    #   # web for HTTP, websecure for HTTPS
+    #   traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    #   # certresolver for Let's Encrypt
+    #   traefik.ingress.kubernetes.io/router.tls.certresolver: letsencrypt
+    #   traefik.ingress.kubernetes.io/router.priority: "100"
+    #   # external-dns annotations (optional)
+    #   external-dns.alpha.kubernetes.io/hostname: ""
+    #   external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+
+    # # TLS configuration
+    tls:
+      enabled: false
+      secretName: ""  # Auto-generated if empty
+
+# ============================================================================
+# Secrets Configuration
+# ============================================================================
+secrets:
+  # Create secrets from values
+  create: true
+
+  # Keycloak admin credentials
+  keycloak:
+    adminUser: dmin
+    adminPassword: "changeme"  # CHANGE THIS!
+    # kuberde realm credentials
+    realm:
+      kuberde:
+        username: admin
+        password: ""  # MUST be set via --set or external secret
+
+  # Database credentials
+  database:
+    user: kuberde
+    password: "changeme"  # CHANGE THIS!
+    name: kuberde
+
+  # Keycloak client secrets
+  keycloakClients:
+    serverClientId: "kuberde-server-admin"
+    agentClientId: "kuberde-agent"
+    serverClientSecret: "changeme"  # For kuberde-server
+    agentClientSecret: "changeme"   # For agents
+
+  # Optional: GitHub OAuth (for Keycloak identity provider)
+  github:
+    enabled: false
+    clientId: ""
+    clientSecret: ""
+
+  # Optional: Existing secret names (if not creating new ones)
+  existingSecrets:
+    keycloakAdminClientSecret: ""  # keycloak-admin-client-secret
+    keycloakAgentClientSecret: ""  # keycloak-agent-client-secret
+    keycloakRealmSecret: ""  # keycloak-realm-secret
+    postgresqlSecret: ""     # postgresql-secret
+
+# ============================================================================
+# CRDs (Custom Resource Definitions)
+# ============================================================================
+crds:
+  install: true
+  keep: true  # Keep CRDs on uninstall
+
+# ============================================================================
+# Service Monitor (Prometheus)
+# ============================================================================
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}
+
+# ============================================================================
+# Additional Configuration
+# ============================================================================
+nameOverride: ""
+fullnameOverride: ""
+
+# Pod Security
+podSecurityPolicy:
+  enabled: false
+
+# Network Policy
+networkPolicy:
+  enabled: false
+  policyTypes:
+    - Ingress
+    - Egress
+
+external:
+  postgresql:
+    enabled: false
+    host: ""
+    port: 5432
+    user: ""
+    password: ""
+    database: ""
+    # username and password as key-value pairs in secret for external postgresql
+    existingSecrets: ""

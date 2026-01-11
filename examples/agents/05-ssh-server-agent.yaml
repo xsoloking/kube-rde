@@ -1,0 +1,77 @@
+---
+# SSH Server Agent - FRP exposed SSH service
+# This agent proxies SSH access through FRP, allowing remote SSH connections
+# via the FRP server on a custom port.
+#
+# Access: ssh -p 2022 agent-user@<kuberde-server-address>
+#
+apiVersion: kuberde.io/v1beta1
+kind: RDEAgent
+metadata:
+  name: ssh-server
+  namespace: kuberde
+spec:
+  # Owner determines the agent ID format: user-{owner}-{name}
+  owner: "testuser"
+
+  # Server connection
+  serverUrl: "ws://kuberde-server.kuberde.svc:80/ws"
+  authSecret: "kuberde-agents-auth"
+
+  # Local SSH service - openssh-server listens on 2222 by default
+  # This MUST match the containerPort defined below
+  localTarget: "localhost:2222"
+
+  # SSH workload container
+  workloadContainer:
+    image: "linuxserver/openssh-server:latest"
+    imagePullPolicy: "IfNotPresent"
+
+    # CRITICAL: containerPort must match localTarget port
+    ports:
+      - containerPort: 2222
+        name: "ssh"
+        protocol: "TCP"
+
+    # Environment variables for openssh-server
+    env:
+      # Enable password authentication
+      - name: "PASSWORD_ACCESS"
+        value: "true"
+
+      # Enable public key authentication
+      - name: "PUBKEY_ACCESS"
+        value: "true"
+
+      # Create default user
+      - name: "USER_NAME"
+        value: "agent-user"
+
+      # User password (for password auth)
+      - name: "USER_PASSWORD"
+        value: "sshpassword123"
+
+      # Allow sudo
+      - name: "SUDO_ACCESS"
+        value: "true"
+
+      # SSH logging
+      - name: "LOG_STDOUT"
+        value: "true"
+
+    # Resource limits
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "64Mi"
+      limits:
+        cpu: "200m"
+        memory: "256Mi"
+
+  # SSH TTL - scale down after 2 minutes idle (for testing TTL functionality)
+  ttl: "1h"
+
+  # SSH public key for key-based authentication
+  # Replace with your actual public key for passwordless access
+  sshPublicKeys:
+    - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIHj8pk5seTiiZUvyy5q48gB9DvjrO1dTuLWrkcvUXOS soloking@soloking.local"

@@ -1,0 +1,133 @@
+{{- if .Values.server.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kuberde.fullname" . }}-server
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kuberde.server.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.server.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "kuberde.server.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kuberde.server.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- if .Values.server.serviceAccount.create }}
+      serviceAccountName: {{ include "kuberde.fullname" . }}-server
+      {{- end }}
+      {{- with .Values.server.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: server
+        image: {{ include "kuberde.image" (dict "Values" .Values "componentImage" "kuberde-server") }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.server.service.port }}
+          name: http
+          protocol: TCP
+        {{- if .Values.server.livenessProbe.enabled }}
+        livenessProbe:
+          httpGet:
+            path: {{ .Values.server.livenessProbe.path }}
+            port: {{ .Values.server.livenessProbe.port }}
+          initialDelaySeconds: {{ .Values.server.livenessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.server.livenessProbe.periodSeconds }}
+          timeoutSeconds: {{ .Values.server.livenessProbe.timeoutSeconds }}
+          failureThreshold: {{ .Values.server.livenessProbe.failureThreshold }}
+        {{- end }}
+        {{- if .Values.server.readinessProbe.enabled }}
+        readinessProbe:
+          httpGet:
+            path: {{ .Values.server.readinessProbe.path }}
+            port: {{ .Values.server.readinessProbe.port }}
+          initialDelaySeconds: {{ .Values.server.readinessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.server.readinessProbe.periodSeconds }}
+          timeoutSeconds: {{ .Values.server.readinessProbe.timeoutSeconds }}
+          failureThreshold: {{ .Values.server.readinessProbe.failureThreshold }}
+        {{- end }}
+        env:
+        - name: KEYCLOAK_URL
+          value: "http://{{ include "kuberde.fullname" . }}-keycloak:{{ .Values.keycloak.service.port }}"
+        - name: KEYCLOAK_PUBLIC_URL
+          value: "{{ .Values.global.protocol }}://{{ .Values.global.keycloakDomain }}"
+        - name: KUBERDE_PUBLIC_URL
+          value: "{{ .Values.global.protocol }}://{{ .Values.global.domain }}"
+        - name: KUBERDE_AGENT_DOMAIN
+          value: "{{ .Values.global.agentDomain }}"
+        - name: KUBERDE_AGENT_IMAGE
+          value: {{ include "kuberde.image" (dict "Values" .Values "componentImage" "kuberde-agent") }}
+        - name: KUBERDE_AGENT_SERVER_URL
+          value: "{{ .Values.server.env.KUBERDE_AGENT_SERVER_URL | default "ws://kuberde-server:8080/ws" }}"
+        - name: KUBERDE_AGENT_AUTH_SECRET
+          value: "{{ .Values.server.env.KUBERDE_AGENT_AUTH_SECRET | default "keycloak-agent-client-secret" }}"
+        - name: KUBERDE_NAMESPACE
+          value: "{{ .Release.Namespace }}"
+        - name: KEYCLOAK_ADMIN_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.existingSecrets.keycloakAdminClientSecret | default "keycloak-admin-client-secret" }}
+              key: client-id
+        - name: KEYCLOAK_ADMIN_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.existingSecrets.keycloakAdminClientSecret | default "keycloak-admin-client-secret" }}
+              key: client-secret
+        - name: LOG_LEVEL
+          value: {{ .Values.server.env.LOG_LEVEL | default "INFO" | quote }}
+        {{- if .Values.postgresql.enabled }}
+        - name: DB_HOST
+          value: "{{ include "kuberde.fullname" . }}-postgresql"
+        - name: DB_PORT
+          value: "{{ .Values.postgresql.service.port }}"
+        - name: DB_NAME
+          value: "{{ .Values.secrets.database.name }}"
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.existingSecrets.postgresqlSecret | default "postgresql-secret" }}
+              key: POSTGRES_USER
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.existingSecrets.postgresqlSecret | default "postgresql-secret" }}
+              key: POSTGRES_PASSWORD
+        {{- end }}
+        {{- if .Values.external.postgresql.enabled }}
+        - name: DB_HOST
+          value: "{{ .Values.external.postgresql.host }}"
+        - name: DB_PORT
+          value: "{{ .Values.external.postgresql.port }}"
+        - name: DB_NAME
+          value: "{{ .Values.external.postgresql.database }}"
+        - name: DB_USER
+          {{- if .Values.external.postgresql.user }}
+          value: "{{ .Values.external.postgresql.user }}"
+          {{- end }}
+          {{- if .Values.external.postgresql.existingSecrets }}
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.external.postgresql.existingSecrets }}
+              key: username
+          {{- end }}
+        - name: DB_PASSWORD
+          {{- if .Values.external.postgresql.password }}
+          value: "{{ .Values.external.postgresql.password }}"
+          {{- end }}
+          {{- if .Values.external.postgresql.existingSecrets }}
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.external.postgresql.existingSecrets }}
+              key: password
+          {{- end }}
+        {{- end }}
+        {{- with .Values.server.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+{{- end }}

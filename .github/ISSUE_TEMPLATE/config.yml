@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 GitHub Discussions
+    url: https://github.com/xsoloking/kube-rde/discussions
+    about: Ask questions and discuss ideas with the community
+  - name: 📚 Documentation
+    url: https://github.com/xsoloking/kube-rde/tree/main/docs
+    about: Browse our comprehensive documentation
+  - name: 🔒 Security Vulnerability
+    url: https://github.com/xsoloking/kube-rde/security/advisories/new
+    about: Report security vulnerabilities privately (do not create public issues)

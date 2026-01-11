@@ -1,0 +1,5 @@
+{
+  "name": "KubeRDE - Cloud Management Console",
+  "description": "A comprehensive DevOps platform for managing users, workspaces, and services on a Kubernetes-based infrastructure with real-time monitoring and resource allocation.",
+  "requestFramePermissions": ["camera", "microphone"]
+}

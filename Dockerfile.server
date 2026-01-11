@@ -1,0 +1,33 @@
+FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
+ARG TARGETOS
+ARG TARGETARCH
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY . .
+
+# Build server
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o server cmd/server/main.go
+
+# Build CLI for multiple platforms
+# Running on $BUILDPLATFORM (native) makes this fast even for arm64 target build
+RUN mkdir -p /app/cli-binaries
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /app/cli-binaries/kuberde-cli-linux-amd64 cmd/cli/main.go && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o /app/cli-binaries/kuberde-cli-linux-arm64 cmd/cli/main.go && \
+    CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o /app/cli-binaries/kuberde-cli-darwin-amd64 cmd/cli/main.go && \
+    CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o /app/cli-binaries/kuberde-cli-darwin-arm64 cmd/cli/main.go && \
+    CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o /app/cli-binaries/kuberde-cli-windows-amd64.exe cmd/cli/main.go && \
+    CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -o /app/cli-binaries/kuberde-cli-windows-arm64.exe cmd/cli/main.go
+
+# Run stage
+FROM alpine:latest
+WORKDIR /root/
+COPY --from=builder /app/server .
+COPY --from=builder /app/deploy/migrations ./deploy/migrations
+COPY --from=builder /app/cli-binaries ./cli-binaries
+EXPOSE 8080 2022
+CMD ["./server"]

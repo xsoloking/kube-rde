@@ -1,0 +1,243 @@
+# ============================================================================
+# Https Values for KubeRDE
+# ============================================================================
+# This values file is optimized for production deployment using:
+# - Production domains (frp.byai.uk, sso.byai.uk)
+# - HTTPS with TLS certificates (Let's Encrypt via Traefik)
+# - External DNS integration (Cloudflare)
+# - Enhanced security and resource limits
+#
+# Prerequisites:
+# 1. Traefik configured with Let's Encrypt cert resolver named "letsencrypt"
+# 2. External DNS configured for Cloudflare (optional)
+# 3. DNS records pointing to your cluster
+#
+# Usage:
+# helm install kuberde ./charts/kuberde -f charts/kuberde/values-https.yaml \
+#   --set global.domain=your.domain.com \
+#   --set global.keycloakDomain=sso.your.domain.com \
+#   --set global.agentDomain=*.your.domain.com \
+#   --set global.protocol=https \
+#   --set secrets.keycloak.adminPassword=STRONG_PASSWORD \
+#   --set secrets.keycloak.realm.keycloak.password=STRONG_PASSWORD \
+#   --set secrets.database.password=STRONG_PASSWORD \
+#   --set secrets.keycloakClients.serverClientSecret=STRONG_SECRET \
+#   --set secrets.keycloakClients.agentClientSecret=STRONG_SECRET \
+#   --set secrets.github.enabled=true \
+#   --set secrets.github.clientId=STRONG_SECRET \
+#   --set secrets.github.clientSecret=STRONG_SECRET \
+#   -n kuberde --create-namespace
+#
+# Access URLs:
+#   - Main: https://frp.byai.uk
+#   - SSO: https://sso.byai.uk
+#   - Agents: https://*.frp.byai.uk
+# ============================================================================
+
+# Global Configuration
+global:
+  # Production domains
+  domain: frp.byai.uk
+  keycloakDomain: sso.byai.uk
+  agentDomain: frp.byai.uk
+
+  # HTTPS protocol for production
+  protocol: https
+
+# Image Configuration
+image:
+  repository: soloking
+  pullPolicy: Always
+  tag: latest  # Use specific version tags in production
+
+imagePullSecrets: []  # Add if using private registry
+
+# Server
+server:
+  enabled: true
+  replicaCount: 1
+
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+
+  env:
+    LOG_LEVEL: INFO  # Production logging level
+
+
+# Operator
+operator:
+  enabled: true
+  replicaCount: 1  # Single instance (uses leader election internally)
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+  env:
+    LOG_LEVEL: INFO
+
+# Web UI
+web:
+  enabled: true
+  replicaCount: 1
+
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+# Keycloak
+keycloak:
+  enabled: true
+  replicaCount: 1  # Increase to 2+ for HA (requires DB clustering)
+
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+
+  # HTTPS configuration for production
+  hostname:
+    strict: true  # Enforce strict hostname checking
+    strictHttps: true  # Require HTTPS
+    httpEnabled: false  # Disable HTTP
+    strictBackchannel: true  # Strict backchannel
+
+# PostgreSQL
+postgresql:
+  enabled: true
+  replicaCount: 1  # Use external managed DB (RDS/CloudSQL) for production HA
+
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+
+  # Persistence with production storage class
+  persistence:
+    enabled: true
+    # storageClass: "ssd"  # Use fast storage in production
+    size: 1Gi  # Larger size for production
+    annotations: {}
+
+  # Backup configuration (implement with external tools)
+  # Consider using Velero or cloud-native backup solutions
+
+# Ingress Configuration
+ingress:
+  enabled: true
+  className: traefik
+
+  # Middleware for HTTP headers
+  middleware:
+    enabled: false
+    name: force-http-headers
+
+  main:
+    enabled: true
+    annotations:
+      kubernetes.io/ingress.class: traefik
+      # web for HTTP, websecure for HTTPS
+      traefik.ingress.kubernetes.io/router.entrypoints: websecure
+      # certresolver for Let's Encrypt
+      traefik.ingress.kubernetes.io/router.tls.certresolver: letsencrypt
+      traefik.ingress.kubernetes.io/router.priority: "50"
+      # external-dns annotations (optional)
+      # external-dns.alpha.kubernetes.io/hostname: "frp.byai.uk"
+      # external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+    # TLS configuration
+    tls:
+      enabled: true
+      secretName: ""  # Auto-generated if empty
+
+    # Wildcard routing for agents
+    wildcard:
+      enabled: true
+
+  keycloak:
+    annotations:
+      kubernetes.io/ingress.class: traefik
+      # web for HTTP, websecure for HTTPS
+      traefik.ingress.kubernetes.io/router.entrypoints: websecure
+      # certresolver for Let's Encrypt
+      traefik.ingress.kubernetes.io/router.tls.certresolver: letsencrypt
+      traefik.ingress.kubernetes.io/router.priority: "100"
+      # external-dns annotations (optional)
+      # external-dns.alpha.kubernetes.io/hostname: ""
+      # external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+
+    # TLS configuration
+    tls:
+      enabled: true
+      secretName: ""  # Auto-generated if empty
+
+# Secrets Configuration
+secrets:
+  create: true
+
+  # PRODUCTION SECURITY WARNING:
+  # DO NOT commit real passwords to Git!
+  # Use --set flags or external secret management (Vault, Sealed Secrets, etc.)
+  keycloak:
+    adminUser: kuberde-admin
+    adminPassword: "changeit"  # MUST be set via --set
+    realm:
+      kuberde:
+        username: admin
+        password: "changeit"  # MUST be set via --set or external secret
+
+  database:
+    user: kuberde
+    password: "changeit"  # MUST be set via --set
+    name: kuberde
+
+  keycloakClients:
+    serverClientSecret: "changeit"  # MUST be set via --set
+    agentClientSecret: "changeit"   # MUST be set via --set
+
+  # GitHub OAuth for Keycloak identity provider
+  github:
+    enabled: false  # Enable for production SSO
+    clientId: ""  # Set from .env.byai or --set
+    clientSecret: ""  # Set from .env.byai or --set
+
+# CRDs
+crds:
+  install: true
+  keep: true  # Keep CRDs on uninstall (avoid data loss)
+
+# Service Monitor for Prometheus
+serviceMonitor:
+  enabled: true  # Enable monitoring in production
+  interval: 30s
+  scrapeTimeout: 10s
+  labels:
+    prometheus: kube-prometheus
+
+# Security
+podSecurityPolicy:
+  enabled: true  # Enable PSP in production
+
+networkPolicy:
+  enabled: true  # Enable network policies
+  policyTypes:
+    - Ingress
+    - Egress

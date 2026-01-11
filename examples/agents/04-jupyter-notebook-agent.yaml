@@ -1,0 +1,108 @@
+---
+# Jupyter Notebook Agent - FRP exposed Jupyter Lab
+# This agent proxies Jupyter Notebook/Lab through FRP, providing
+# an interactive Python development environment accessible via browser.
+#
+# Access: http://<kuberde-server-address>:2022/lab
+# Token: Check pod logs for Jupyter token
+#
+apiVersion: kuberde.io/v1beta1
+kind: RDEAgent
+metadata:
+  name: jupyter-notebook
+  namespace: kuberde
+spec:
+  # Owner determines the agent ID format: user-{owner}-{name}
+  owner: "testuser"
+
+  # Server connection
+  serverUrl: "ws://kuberde-server.kuberde.svc:80/ws"
+  authSecret: "test-agents-auth"
+
+  # Local Jupyter service - listens on 8888
+  # This MUST match the containerPort defined below
+  localTarget: "localhost:8888"
+
+  # Jupyter Notebook workload container
+  # Using quay.io/jupyter/base-notebook instead of jupyter/notebook
+  # because official Jupyter images on Quay.io support both AMD64 and ARM64 architectures
+  workloadContainer:
+    image: "quay.io/jupyter/base-notebook:latest"
+    imagePullPolicy: "IfNotPresent"
+
+    # CRITICAL: containerPort must match localTarget port
+    ports:
+      - containerPort: 8888
+        name: "http"
+        protocol: "TCP"
+
+    # Command to start Jupyter with token-based access
+    command:
+      - "jupyter"
+      - "notebook"
+
+    args:
+      - "--ip=0.0.0.0"
+      - "--port=8888"
+      - "--allow-root"
+      - "--NotebookApp.token=jupyter2024"
+      - "--NotebookApp.password=''"
+      - "--NotebookApp.allow_remote_access=true"
+
+    # Environment variables for Jupyter
+    env:
+      # Jupyter config
+      - name: "JUPYTER_ENABLE_LAB"
+        value: "yes"
+
+      # Grant all permissions (for demo, restrict in production)
+      - name: "GRANT_SUDO"
+        value: "yes"
+
+      # Locale
+      - name: "LANG"
+        value: "en_US.UTF-8"
+
+      # Conda environment
+      - name: "CONDA_DIR"
+        value: "/opt/conda"
+
+    # Volume mounts for Jupyter work directory
+    volumeMounts:
+      - name: "jupyter-work"
+        mountPath: "/home/jovyan/work"
+        readOnly: false
+
+      - name: "jupyter-data"
+        mountPath: "/home/jovyan/.jupyter"
+        readOnly: false
+
+    # Resource limits - Jupyter can be resource-intensive
+    resources:
+      requests:
+        cpu: "200m"
+        memory: "512Mi"
+      limits:
+        cpu: "1000m"
+        memory: "1Gi"
+
+  # Storage for Jupyter notebooks and data
+  storage:
+    # Notebook workspace
+    - name: "jupyter-work"
+      storageClass: "local-path"  # Use local-path or your preferred StorageClass
+      size: "10Gi"
+      mountPath: "/home/jovyan/work"
+
+    # Jupyter configuration
+    - name: "jupyter-data"
+      storageClass: "local-path"
+      size: "2Gi"
+      mountPath: "/home/jovyan/.jupyter"
+
+  # Jupyter TTL - scale down after 4 hours idle (longer for notebooks)
+  ttl: "4h"
+
+  # Node selector for resource-constrained deployments (optional)
+  # nodeSelector:
+  #   node.kubernetes.io/instance-type: "compute-optimized"

@@ -1,0 +1,82 @@
+---
+# Code Server Agent - FRP exposed VS Code IDE
+# This agent proxies VS Code IDE (code-server) through FRP, providing
+# a browser-based code editor accessible through the FRP server.
+#
+# Access: https://<kuberde-server-address>:2022
+# Password: codepassword123
+#
+apiVersion: kuberde.io/v1beta1
+kind: RDEAgent
+metadata:
+  name: code-server
+  namespace: kuberde
+spec:
+  # Owner determines the agent ID format: user-{owner}-{name}
+  owner: "testuser"
+
+  # Server connection
+  serverUrl: "ws://kuberde-server.kuberde.svc:80/ws"
+  authSecret: "test-agents-auth"
+
+  # Local code-server service - listens on 8443 (HTTPS)
+  # This MUST match the containerPort defined below
+  localTarget: "localhost:8443"
+
+  # Code Server workload container
+  workloadContainer:
+    image: "linuxserver/code-server:latest"
+    imagePullPolicy: "IfNotPresent"
+
+    # CRITICAL: containerPort must match localTarget port
+    ports:
+      - containerPort: 8443
+        name: "https"
+        protocol: "TCP"
+
+    # Environment variables for code-server
+    env:
+      # Web UI password
+      - name: "PASSWORD"
+        value: "codepassword123"
+
+      # Allow sudo in terminal
+      - name: "SUDO_ACCESS"
+        value: "true"
+
+      # Enable sudo password
+      - name: "SUDO_PASSWORD_HASH"
+        value: "false"
+
+      # Proxy settings (for FRP reverse proxy)
+      - name: "PROXY_DOMAIN"
+        value: "code.frp.local"
+
+      # Default extensions
+      - name: "DEFAULT_WORKSPACE"
+        value: "/home/coder/project"
+
+    # Volume mounts for code workspace
+    volumeMounts:
+      - name: "workspace"
+        mountPath: "/home/coder/project"
+        readOnly: false
+
+    # Resource limits
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "256Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+
+  # Storage for code-server workspace
+  storage:
+    - name: "workspace"
+      storageClass: "local-path"  # Use local-path or your preferred StorageClass
+      size: "5Gi"
+      mountPath: "/home/coder/project"
+
+  # Code Server TTL - scale down after 2 hours idle
+  ttl: "2h"

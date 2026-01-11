@@ -1,0 +1,38 @@
+{{- if .Values.postgresql.enabled }}
+---
+# Headless service for StatefulSet
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kuberde.fullname" . }}-postgresql
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kuberde.postgresql.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "kuberde.postgresql.selectorLabels" . | nindent 4 }}
+  ports:
+  - name: postgresql
+    port: {{ .Values.postgresql.service.port }}
+    targetPort: {{ .Values.postgresql.service.port }}
+    protocol: TCP
+---
+# Regular service for client connections
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kuberde.fullname" . }}-postgresql-service
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kuberde.postgresql.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "kuberde.postgresql.selectorLabels" . | nindent 4 }}
+  ports:
+  - name: postgresql
+    port: {{ .Values.postgresql.service.port }}
+    targetPort: {{ .Values.postgresql.service.port }}
+    protocol: TCP
+{{- end }}

@@ -1,0 +1,195 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  GO_VERSION: '1.24'
+
+jobs:
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      version: ${{ steps.get_version.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog
+        id: changelog
+        uses: metcalfc/changelog-generator@v4.1.0
+        with:
+          myToken: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.get_version.outputs.version }}
+          release_name: Release ${{ steps.get_version.outputs.version }}
+          body: |
+            ## Changes in ${{ steps.get_version.outputs.version }}
+
+            ${{ steps.changelog.outputs.changelog }}
+
+            ## Installation
+
+            ### Using Docker Images
+
+            ```bash
+            # Pull images
+            docker pull ghcr.io/${{ github.repository_owner }}/kuberde-server:${{ steps.get_version.outputs.version }}
+            docker pull ghcr.io/${{ github.repository_owner }}/kuberde-operator:${{ steps.get_version.outputs.version }}
+            docker pull ghcr.io/${{ github.repository_owner }}/kuberde-agent:${{ steps.get_version.outputs.version }}
+            docker pull ghcr.io/${{ github.repository_owner }}/kuberde-web:${{ steps.get_version.outputs.version }}
+            ```
+
+            ### Using Kubernetes
+
+            ```bash
+            # Update image tags in deploy/k8s/*.yaml to ${{ steps.get_version.outputs.version }}
+            kubectl apply -f deploy/k8s/
+            ```
+
+            ### Using Helm (coming soon)
+
+            ```bash
+            helm install kuberde kuberde/kuberde --version ${{ steps.get_version.outputs.version }}
+            ```
+
+            ## Documentation
+
+            - [Installation Guide](https://github.com/${{ github.repository }}/blob/${{ steps.get_version.outputs.version }}/docs/QUICK_START.md)
+            - [Configuration Reference](https://github.com/${{ github.repository }}/blob/${{ steps.get_version.outputs.version }}/docs/CONFIGURATION.md)
+            - [Full Documentation](https://github.com/${{ github.repository }}/tree/${{ steps.get_version.outputs.version }}/docs)
+
+            ---
+
+            **Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ steps.changelog.outputs.previous_tag }}...${{ steps.get_version.outputs.version }}
+          draft: false
+          prerelease: ${{ contains(steps.get_version.outputs.version, '-') }}
+
+  build-binaries:
+    name: Build Release Binaries
+    needs: create-release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          # Linux
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+          # macOS
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+          # Windows
+          - os: ubuntu-latest
+            goos: windows
+            goarch: amd64
+        component: [server, agent, operator, cli]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          VERSION=${{ needs.create-release.outputs.version }}
+          COMPONENT=${{ matrix.component }}
+
+          # Determine binary name
+          if [ "$COMPONENT" = "cli" ]; then
+            BINARY_NAME="kuberde-cli"
+          elif [ "$COMPONENT" = "operator" ]; then
+            BINARY_NAME="kuberde-operator"
+          else
+            BINARY_NAME="$COMPONENT"
+          fi
+
+          # Add .exe for Windows
+          if [ "$GOOS" = "windows" ]; then
+            BINARY_NAME="${BINARY_NAME}.exe"
+          fi
+
+          # Build
+          go build -ldflags="-s -w -X main.version=${VERSION}" -o ${BINARY_NAME} ./cmd/${COMPONENT}
+
+          # Create archive
+          ARCHIVE_NAME="kuberde-${COMPONENT}-${VERSION}-${GOOS}-${GOARCH}"
+          if [ "$GOOS" = "windows" ]; then
+            zip ${ARCHIVE_NAME}.zip ${BINARY_NAME}
+            echo "ASSET_PATH=${ARCHIVE_NAME}.zip" >> $GITHUB_ENV
+            echo "ASSET_NAME=${ARCHIVE_NAME}.zip" >> $GITHUB_ENV
+            echo "ASSET_TYPE=application/zip" >> $GITHUB_ENV
+          else
+            tar czf ${ARCHIVE_NAME}.tar.gz ${BINARY_NAME}
+            echo "ASSET_PATH=${ARCHIVE_NAME}.tar.gz" >> $GITHUB_ENV
+            echo "ASSET_NAME=${ARCHIVE_NAME}.tar.gz" >> $GITHUB_ENV
+            echo "ASSET_TYPE=application/gzip" >> $GITHUB_ENV
+          fi
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ${{ env.ASSET_PATH }}
+          asset_name: ${{ env.ASSET_NAME }}
+          asset_content_type: ${{ env.ASSET_TYPE }}
+
+  update-install-script:
+    name: Update Install Script
+    needs: [create-release, build-binaries]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Update version in install script
+        run: |
+          VERSION=${{ needs.create-release.outputs.version }}
+          # Update install scripts with new version
+          # This is a placeholder - implement based on your install script structure
+          echo "Updated install scripts to version ${VERSION}"
+
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add scripts/
+          git commit -m "Update install scripts to ${VERSION}" || echo "No changes to commit"
+          git push || echo "No changes to push"

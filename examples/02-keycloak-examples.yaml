@@ -1,0 +1,258 @@
+# Keycloak Deployment Configuration Examples
+# Choose the configuration that matches your domain setup
+
+# ============================================================================
+# Option 1: Keycloak with Path Prefix (e.g., kuberde.com/auth)
+# ============================================================================
+# Use this configuration when Keycloak is served at a path prefix
+# Example: https://kuberde.com/auth
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak-with-path-prefix
+  namespace: kuberde
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak
+  template:
+    metadata:
+      labels:
+        app: keycloak
+    spec:
+      containers:
+      - name: keycloak
+        image: quay.io/keycloak/keycloak:23.0.0
+        args: ["start", "--import-realm"]  # Use 'start' for production, 'start-dev' for development
+        env:
+        # Admin credentials (CHANGE IN PRODUCTION!)
+        - name: KEYCLOAK_ADMIN
+          valueFrom:
+            secretKeyRef:
+              name: keycloak-admin-secret
+              key: username
+        - name: KEYCLOAK_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: keycloak-admin-secret
+              key: password
+
+        # Path prefix configuration - IMPORTANT for path-based routing
+        - name: KC_HTTP_RELATIVE_PATH
+          value: "/auth"
+
+        # Hostname configuration
+        - name: KC_HOSTNAME
+          value: "kuberde.com"  # CHANGE THIS to your domain
+
+        # Proxy configuration (required when behind Ingress)
+        - name: KC_PROXY
+          value: "edge"
+
+        # HTTPS configuration
+        - name: KC_HOSTNAME_STRICT_HTTPS
+          value: "true"
+
+        # Database configuration (production)
+        # Uncomment and configure for production use
+        # - name: KC_DB
+        #   value: "postgres"
+        # - name: KC_DB_URL
+        #   value: "jdbc:postgresql://postgresql:5432/keycloak"
+        # - name: KC_DB_USERNAME
+        #   value: "keycloak"
+        # - name: KC_DB_PASSWORD
+        #   valueFrom:
+        #     secretKeyRef:
+        #       name: keycloak-db-secret
+        #       key: password
+
+        # Health check configuration
+        - name: KC_HEALTH_ENABLED
+          value: "true"
+
+        volumeMounts:
+        - name: realm-config
+          mountPath: /opt/keycloak/data/import
+          readOnly: true
+        ports:
+        - containerPort: 8080
+          name: http
+        readinessProbe:
+          httpGet:
+            path: /auth/health/ready  # Note: includes /auth prefix
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /auth/health/live  # Note: includes /auth prefix
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 30
+      volumes:
+      - name: realm-config
+        secret:
+          secretName: keycloak-realm-secret
+
+---
+# ============================================================================
+# Option 2: Keycloak on Subdomain (e.g., sso.kuberde.com)
+# ============================================================================
+# Use this configuration when Keycloak is on a separate subdomain
+# Example: https://sso.kuberde.com
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak-subdomain
+  namespace: kuberde
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak
+  template:
+    metadata:
+      labels:
+        app: keycloak
+    spec:
+      containers:
+      - name: keycloak
+        image: quay.io/keycloak/keycloak:23.0.0
+        args: ["start", "--import-realm"]
+        env:
+        # Admin credentials (CHANGE IN PRODUCTION!)
+        - name: KEYCLOAK_ADMIN
+          valueFrom:
+            secretKeyRef:
+              name: keycloak-admin-secret
+              key: username
+        - name: KEYCLOAK_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: keycloak-admin-secret
+              key: password
+
+        # Hostname configuration - use subdomain
+        - name: KC_HOSTNAME
+          value: "sso.kuberde.com"  # CHANGE THIS to your subdomain
+
+        # Proxy configuration (required when behind Ingress)
+        - name: KC_PROXY
+          value: "edge"
+
+        # HTTPS configuration
+        - name: KC_HOSTNAME_STRICT_HTTPS
+          value: "true"
+
+        # Database configuration (production)
+        # Uncomment and configure for production use
+        # - name: KC_DB
+        #   value: "postgres"
+        # - name: KC_DB_URL
+        #   value: "jdbc:postgresql://postgresql:5432/keycloak"
+        # - name: KC_DB_USERNAME
+        #   value: "keycloak"
+        # - name: KC_DB_PASSWORD
+        #   valueFrom:
+        #     secretKeyRef:
+        #       name: keycloak-db-secret
+        #       key: password
+
+        # Health check configuration
+        - name: KC_HEALTH_ENABLED
+          value: "true"
+
+        volumeMounts:
+        - name: realm-config
+          mountPath: /opt/keycloak/data/import
+          readOnly: true
+        ports:
+        - containerPort: 8080
+          name: http
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 30
+      volumes:
+      - name: realm-config
+        secret:
+          secretName: keycloak-realm-secret
+
+---
+# ============================================================================
+# Keycloak Service (same for both options)
+# ============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  namespace: kuberde
+spec:
+  selector:
+    app: keycloak
+  ports:
+  - port: 8080
+    targetPort: 8080
+    name: http
+  type: ClusterIP
+
+---
+# ============================================================================
+# Production Notes
+# ============================================================================
+#
+# 1. Database Configuration:
+#    - For production, use external PostgreSQL database
+#    - Uncomment the KC_DB* environment variables
+#    - Create keycloak-db-secret with database password
+#
+# 2. Admin Credentials:
+#    - Change default admin/admin credentials
+#    - Use Kubernetes Secrets for sensitive data
+#    - Create secret with:
+#      kubectl create secret generic keycloak-admin-secret \
+#        --from-literal=username=admin \
+#        --from-literal=password=CHANGE_ME \
+#        -n kuberde
+#
+# 3. Realm Configuration:
+#    - Import realm configuration on first start
+#    - Mount realm export JSON as Secret
+#    - See deploy/keycloak/realm-export.json for example
+#
+# 4. Performance Tuning:
+#    - Add resource limits and requests
+#    - Configure multiple replicas for HA
+#    - Use persistent storage for database
+#
+# 5. Security:
+#    - Enable HTTPS (KC_HOSTNAME_STRICT_HTTPS=true)
+#    - Configure proper CORS settings
+#    - Use strong admin passwords
+#    - Regular security updates
+#
+# 6. Path Prefix Considerations:
+#    - Health check paths must include prefix
+#    - OAuth redirect URLs automatically include prefix
+#    - Ingress rewrite rules must be configured correctly
+#
+# Example resource limits:
+#   resources:
+#     requests:
+#       memory: "512Mi"
+#       cpu: "500m"
+#     limits:
+#       memory: "2Gi"
+#       cpu: "2000m"

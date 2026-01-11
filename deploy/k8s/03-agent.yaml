@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kuberde-agents-auth
+  namespace: ${NAMESPACE}
+type: Opaque
+stringData:
+  CLIENT_ID: "kuberde-agent"
+  CLIENT_SECRET: "${KEYCLOAK_CLIENT_SECRET_FOR_AGENT}"

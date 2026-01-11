@@ -1,0 +1,27 @@
+{{- if .Values.server.enabled }}
+{{- if .Values.server.rbac.create }}
+apiVersion: {{ include "rbac.apiVersion" . }}
+kind: Role
+metadata:
+  name: {{ include "kuberde.fullname" . }}-server
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kuberde.server.labels" . | nindent 4 }}
+rules:
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "update", "patch"]
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["list", "get"]
+- apiGroups: ["kuberde.io"]
+  resources: ["rdeagents"]
+  verbs: ["get", "list", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["persistentvolumeclaims"]
+  verbs: ["get", "list", "create", "delete"]
+{{- end }}
+{{- end }}

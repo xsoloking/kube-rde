@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: ${NAMESPACE}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak
+  template:
+    metadata:
+      labels:
+        app: keycloak
+    spec:
+      containers:
+      - name: keycloak
+        image: quay.io/keycloak/keycloak:23.0.0
+        args: ["start-dev", "--import-realm", "--health-enabled=true"]
+        env:
+        - name: KEYCLOAK_ADMIN
+          value: "${KEYCLOAK_ADMIN_USER}"
+        - name: KEYCLOAK_ADMIN_PASSWORD
+          value: "${KEYCLOAK_ADMIN_PASSWORD}"
+        - name: KC_HOSTNAME
+          value: "${KEYCLOAK_DOMAIN}"
+        - name: KC_PROXY
+          value: "edge"
+        - name: KC_HOSTNAME_STRICT
+          value: ${KC_HOSTNAME_STRICT}
+        - name: KC_HOSTNAME_STRICT_HTTPS
+          value: ${KC_HOSTNAME_STRICT_HTTPS}
+        - name: KC_HTTP_ENABLED
+          value: ${KC_HTTP_ENABLED}
+        # Frontend URL (public access)
+        - name: KC_FRONTEND_URL
+          value: "${KC_FRONTEND_URL}"
+        - name: KC_HOSTNAME_STRICT_BACKCHANNEL
+          value: ${KC_HOSTNAME_STRICT_BACKCHANNEL}
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 120
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 5
+
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        volumeMounts:
+        - name: realm-config
+          mountPath: /opt/keycloak/data/import
+          readOnly: true
+        ports:
+        - containerPort: 8080
+          name: http
+      volumes:
+      - name: realm-config
+        secret:
+          secretName: keycloak-realm-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  namespace: ${NAMESPACE}
+spec:
+  selector:
+    app: keycloak
+  ports:
+  - port: 8080
+    targetPort: 8080
+    name: http

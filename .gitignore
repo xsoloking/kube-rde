@@ -1,0 +1,48 @@
+# Binaries
+/agent
+/server
+/kuberde-cli
+/kuberde-operator
+/mock
+
+# Logs
+*.log
+build-errors.log
+build-errors-agent.log
+
+# OS Specific
+.DS_Store
+
+# IDEs
+.vscode/
+.idea/
+
+# Go
+go.work
+
+# Development
+.env
+tmp/
+
+# Docker
+.dockerignore
+
+# Air (hot reload)
+.air.toml.swp
+.air-agent.toml.swp
+
+# Test coverage
+coverage.out
+*.coverprofile
+
+# Build artifacts
+dist/
+build/
+
+# Environment variables
+.env
+.env.k3d
+.env.byai
+values-byai.yaml
+
+.git_bak

@@ -1,0 +1,83 @@
+{{- if .Values.operator.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kuberde.fullname" . }}-operator
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kuberde.operator.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.operator.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "kuberde.operator.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kuberde.operator.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- if .Values.operator.serviceAccount.create }}
+      serviceAccountName: {{ include "kuberde.operator.serviceAccountName" . }}
+      {{- end }}
+      {{- with .Values.operator.securityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: operator
+        image: {{ include "kuberde.image" (dict "Values" .Values "componentImage" "kuberde-operator") }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.operator.livenessProbe.port }}
+          name: health
+          protocol: TCP
+        env:
+        - name: KUBERDE_SERVER_API
+          value: "http://{{ include "kuberde.fullname" . }}-server:{{ .Values.server.service.port }}"
+        - name: KEYCLOAK_URL
+          value: "http://{{ include "kuberde.fullname" . }}-keycloak:{{ .Values.keycloak.service.port }}"
+        - name: KUBERDE_AGENT_IMAGE
+          value: {{ include "kuberde.image" (dict "Values" .Values "componentImage" "kuberde-agent") }}
+        - name: LOG_LEVEL
+          value: {{ .Values.operator.env.LOG_LEVEL | default "INFO" | quote }}
+        - name: OPERATOR_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        {{- with .Values.operator.env }}
+        {{- range $key, $value := . }}
+        {{- if ne $key "LOG_LEVEL" }}
+        - name: {{ $key }}
+          value: {{ $value | quote }}
+        {{- end }}
+        {{- end }}
+        {{- end }}
+        {{- with .Values.operator.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- with .Values.operator.containerSecurityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- if .Values.operator.livenessProbe.enabled }}
+        livenessProbe:
+          httpGet:
+            path: {{ .Values.operator.livenessProbe.path }}
+            port: {{ .Values.operator.livenessProbe.port }}
+          initialDelaySeconds: {{ .Values.operator.livenessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.operator.livenessProbe.periodSeconds }}
+          timeoutSeconds: {{ .Values.operator.livenessProbe.timeoutSeconds }}
+          failureThreshold: {{ .Values.operator.livenessProbe.failureThreshold }}
+        {{- end }}
+        {{- if .Values.operator.readinessProbe.enabled }}
+        readinessProbe:
+          httpGet:
+            path: {{ .Values.operator.readinessProbe.path }}
+            port: {{ .Values.operator.readinessProbe.port }}
+          initialDelaySeconds: {{ .Values.operator.readinessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.operator.readinessProbe.periodSeconds }}
+          timeoutSeconds: {{ .Values.operator.readinessProbe.timeoutSeconds }}
+          failureThreshold: {{ .Values.operator.readinessProbe.failureThreshold }}
+        {{- end }}
+{{- end }}

@@ -1,0 +1,138 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kuberde-operator
+  namespace: ${NAMESPACE}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kuberde-operator-role
+rules:
+# 1. Manage RDEAgents (CRD)
+- apiGroups: ["kuberde.io"]
+  resources: ["rdeagents"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# 1b. Manage RDEAgent status subresource
+- apiGroups: ["kuberde.io"]
+  resources: ["rdeagents/status"]
+  verbs: ["get", "update", "patch"]
+# 2. Manage Deployments (for creating agent/workload pods)
+- apiGroups: ["apps"]
+  resources: ["deployments", "deployments/scale"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# 3. Access Secrets (for reading Auth credentials and managing SSH credential Secrets)
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# 4. Manage PersistentVolumeClaims (for storage provisioning)
+- apiGroups: [""]
+  resources: ["persistentvolumeclaims"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# 5. Check Pod status (for agent health monitoring)
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+# 6. Create Events for logging (optional but recommended)
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kuberde-operator-binding
+subjects:
+- kind: ServiceAccount
+  name: kuberde-operator
+  namespace: ${NAMESPACE}
+roleRef:
+  kind: ClusterRole
+  name: kuberde-operator-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kuberde-operator
+  namespace: ${NAMESPACE}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kuberde-operator
+  template:
+    metadata:
+      labels:
+        app: kuberde-operator
+    spec:
+      serviceAccountName: kuberde-operator
+      # Security context for pod
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+
+      containers:
+      - name: operator
+        image: soloking/kuberde-operator:latest
+        imagePullPolicy: Always
+
+        # Port for health checks (internal only, not exposed via Service)
+        ports:
+        - containerPort: 8080
+          name: health
+          protocol: TCP
+
+        # Environment variables
+        env:
+        - name: KUBERDE_SERVER_API
+          value: "http://kuberde-server:8080" # Internal Service URL
+        - name: KEYCLOAK_URL
+          value: "http://keycloak:8080"
+        - name: KUBERDE_AGENT_IMAGE
+          value: ${KUBERDE_AGENT_IMAGE}
+        - name: LOG_LEVEL
+          value: "INFO"
+        - name: OPERATOR_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+
+        # Resource limits and requests
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+
+        # Security context for container
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+          # Note: readOnlyRootFilesystem prevents binary execution in some runtimes
+          # Our security is maintained by: runAsNonRoot, capabilities dropped,
+          # and allowPrivilegeEscalation=false
+
+        # Health checks
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2

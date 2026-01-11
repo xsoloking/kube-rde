@@ -1,0 +1,32 @@
+FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
+ARG TARGETOS
+ARG TARGETARCH
+WORKDIR /app
+
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY cmd ./cmd
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o kuberde-operator ./cmd/operator
+
+FROM alpine:latest
+
+# Create non-root user and necessary directories
+RUN addgroup -g 65532 nonroot && \
+    adduser -D -u 65532 -G nonroot nonroot && \
+    mkdir -p /app && \
+    chown -R nonroot:nonroot /app
+
+WORKDIR /app
+
+# Copy binary from builder
+COPY --from=builder --chown=nonroot:nonroot /app/kuberde-operator .
+
+# Ensure binary is executable
+RUN chmod +x /app/kuberde-operator
+
+USER nonroot
+
+CMD ["./kuberde-operator"]

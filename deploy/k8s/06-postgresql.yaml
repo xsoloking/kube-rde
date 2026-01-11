@@ -1,0 +1,249 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgresql-secret
+  namespace: ${NAMESPACE}
+type: Opaque
+stringData:
+  postgres-password: "${POSTGRES_PASSWORD}"  # Change in production
+  username: "${DB_USER}"
+  password: "${DB_PASSWORD}"  # Change in production
+  connection-string: "postgresql://${DB_USER}:${DB_PASSWORD}@postgresql:5432/${DB_NAME}"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgresql-config
+  namespace: ${NAMESPACE}
+data:
+  # PostgreSQL server configuration
+  postgresql.conf: |
+    # PostgreSQL Configuration
+    max_connections = 200
+    shared_buffers = 256MB
+    effective_cache_size = 1GB
+    maintenance_work_mem = 64MB
+    checkpoint_completion_target = 0.9
+    wal_buffers = 16MB
+    default_statistics_target = 100
+    random_page_cost = 1.1
+    effective_io_concurrency = 200
+    work_mem = 1310kB
+    min_wal_size = 4GB
+    max_wal_size = 16GB
+    max_worker_processes = 4
+    max_parallel_workers_per_gather = 2
+    max_parallel_workers = 4
+    max_parallel_maintenance_workers = 2
+
+  # Database initialization script
+  init-db.sql: |
+    -- Create the main application database
+    CREATE DATABASE IF NOT EXISTS kuberde;
+
+    -- Connect to the database
+    \c kuberde
+
+    -- Create extensions
+    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+    -- Grant permissions to the kuberde user
+    GRANT CONNECT ON DATABASE kuberde TO kuberde;
+    GRANT USAGE ON SCHEMA public TO kuberde;
+    GRANT CREATE ON SCHEMA public TO kuberde;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO kuberde;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO kuberde;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO kuberde;
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql
+  namespace: ${NAMESPACE}
+  labels:
+    app: postgresql
+spec:
+  clusterIP: None  # Headless service for StatefulSet
+  selector:
+    app: postgresql
+  ports:
+  - name: postgresql
+    port: 5432
+    targetPort: 5432
+    protocol: TCP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql-service
+  namespace: ${NAMESPACE}
+  labels:
+    app: postgresql
+spec:
+  type: ClusterIP
+  selector:
+    app: postgresql
+  ports:
+  - name: postgresql
+    port: 5432
+    targetPort: 5432
+    protocol: TCP
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgresql
+  namespace: ${NAMESPACE}
+  labels:
+    app: postgresql
+spec:
+  serviceName: postgresql
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgresql
+  template:
+    metadata:
+      labels:
+        app: postgresql
+    spec:
+      securityContext:
+        fsGroup: 999  # PostgreSQL user ID
+        runAsNonRoot: true
+        runAsUser: 999
+
+      containers:
+      - name: postgresql
+        image: postgres:15-alpine
+        imagePullPolicy: IfNotPresent
+
+        # Port exposure
+        ports:
+        - name: postgresql
+          containerPort: 5432
+          protocol: TCP
+
+        # Environment variables for initialization
+        env:
+        - name: POSTGRES_DB
+          value: ${DB_NAME}
+        - name: POSTGRES_USER
+          value: ${DB_USER}
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-secret
+              key: postgres-password
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+
+        # Resource requests and limits
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 2Gi
+
+        # Health checks
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - pg_isready -U kuberde -d kuberde
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        readinessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - pg_isready -U kuberde -d kuberde
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+
+        # Volume mounts
+        volumeMounts:
+        - name: postgresql-data
+          mountPath: /var/lib/postgresql/data
+        - name: postgresql-config
+          mountPath: /etc/postgresql/postgresql.conf
+          subPath: postgresql.conf
+          readOnly: true
+        - name: postgresql-runtime
+          mountPath: /var/run/postgresql
+        - name: postgresql-tmp
+          mountPath: /tmp
+
+        # Security context
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+
+      # Volumes
+      volumes:
+      - name: postgresql-config
+        configMap:
+          name: postgresql-config
+          defaultMode: 0644
+      - name: postgresql-runtime
+        emptyDir: {}
+      - name: postgresql-tmp
+        emptyDir: {}
+
+  # Persistent Volume Claim
+  volumeClaimTemplates:
+  - metadata:
+      name: postgresql-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 20Gi  # Adjust based on your needs
+      # If you have a default StorageClass, it will be used automatically
+      # Otherwise, specify storageClassName explicitly:
+      # storageClassName: "standard"
+
+---
+# PodDisruptionBudget to ensure availability during cluster operations
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: postgresql-pdb
+  namespace: ${NAMESPACE}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: postgresql
+
+---
+# Service Monitor for Prometheus (optional, requires prometheus-operator)
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql-exporter
+  namespace: ${NAMESPACE}
+  labels:
+    app: postgresql
+spec:
+  selector:
+    app: postgresql
+  ports:
+  - name: metrics
+    port: 9187
+    targetPort: 9187
+    protocol: TCP

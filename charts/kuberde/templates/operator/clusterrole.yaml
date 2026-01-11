@@ -1,0 +1,39 @@
+{{- if .Values.operator.enabled }}
+{{- if .Values.operator.rbac.create }}
+apiVersion: {{ include "rbac.apiVersion" . }}
+kind: ClusterRole
+metadata:
+  name: {{ include "kuberde.fullname" . }}-operator-role
+  labels:
+    {{- include "kuberde.operator.labels" . | nindent 4 }}
+rules:
+# 1. Manage RDEAgents (CRD)
+- apiGroups: ["kuberde.io"]
+  resources: ["rdeagents"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# 1b. Manage RDEAgent status subresource
+- apiGroups: ["kuberde.io"]
+  resources: ["rdeagents/status"]
+  verbs: ["get", "update", "patch"]
+# 2. Manage Deployments (for creating agent/workload pods)
+- apiGroups: ["apps"]
+  resources: ["deployments", "deployments/scale"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# 3. Access Secrets (for reading Auth credentials and managing SSH credential Secrets)
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# 4. Manage PersistentVolumeClaims (for storage provisioning)
+- apiGroups: [""]
+  resources: ["persistentvolumeclaims"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# 5. Check Pod status (for agent health monitoring)
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+# 6. Create Events for logging (optional but recommended)
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+{{- end }}
+{{- end }}

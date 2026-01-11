@@ -1,0 +1,139 @@
+{{- if .Values.ingress.enabled }}
+---
+# Main Domain and Agents Ingress (HTTPS)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "kuberde.fullname" . }}-server
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kuberde.labels" . | nindent 4 }}
+  annotations:
+    {{- with .Values.ingress.main.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  rules:
+  # Main domain
+  - host: {{ .Values.global.domain }}
+    http:
+      paths:
+      # WebSocket endpoint
+      - path: /ws
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ include "kuberde.fullname" . }}-server
+            port:
+              number: {{ .Values.server.service.port }}
+      # Connect endpoint
+      - path: /connect
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ include "kuberde.fullname" . }}-server
+            port:
+              number: {{ .Values.server.service.port }}
+      # Auth endpoints
+      - path: /auth
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ include "kuberde.fullname" . }}-server
+            port:
+              number: {{ .Values.server.service.port }}
+      # Management endpoints
+      - path: /mgmt
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ include "kuberde.fullname" . }}-server
+            port:
+              number: {{ .Values.server.service.port }}
+      # API endpoints
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ include "kuberde.fullname" . }}-server
+            port:
+              number: {{ .Values.server.service.port }}
+      # Web UI (default)
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ include "kuberde.fullname" . }}-web
+            port:
+              number: {{ .Values.web.service.port }}
+  {{- if .Values.ingress.main.wildcard.enabled }}
+  # Wildcard domain for agents
+  - host: "*.{{ .Values.global.agentDomain }}"
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ include "kuberde.fullname" . }}-server
+            port:
+              number: {{ .Values.server.service.port }}
+  {{- end }}
+  {{- if .Values.ingress.main.tls.enabled }}
+  tls:
+  # TLS for main domain
+  - hosts:
+    - {{ .Values.global.domain }}
+    {{- if .Values.ingress.main.wildcard.enabled }}
+    - "*.{{ .Values.global.domain }}"
+    {{- end }}
+    {{- if .Values.ingress.main.tls.secretName }}
+    secretName: {{ .Values.ingress.main.tls.secretName }}
+    {{- else }}
+    secretName: {{ include "kuberde.fullname" . }}-main-tls
+    {{- end }}
+  {{- end }}
+---
+# Separate Ingress for Keycloak with higher priority (HTTP)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "kuberde.fullname" . }}-keycloak
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kuberde.labels" . | nindent 4 }}
+  annotations:
+    {{- with .Values.ingress.keycloak.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  rules:
+  # Keycloak subdomain
+  - host: {{ .Values.global.keycloakDomain }}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ include "kuberde.fullname" . }}-keycloak
+            port:
+              number: {{ .Values.keycloak.service.port }}
+  {{- if .Values.ingress.keycloak.tls.enabled }}
+  tls:
+  # TLS for Keycloak domain
+  - hosts:
+    - {{ .Values.global.keycloakDomain }}
+    {{- if .Values.ingress.keycloak.tls.secretName }}
+    secretName: {{ .Values.ingress.keycloak.tls.secretName }}
+    {{- else }}
+    secretName: {{ include "kuberde.fullname" . }}-keycloak-tls
+    {{- end }}
+  {{- end }}
+{{- end }}

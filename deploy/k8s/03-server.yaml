@@ -1,0 +1,139 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kuberde-server
+  namespace: ${NAMESPACE}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kuberde-server
+  namespace: ${NAMESPACE}
+rules:
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "update", "patch"]
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["list", "get"]
+- apiGroups: ["kuberde.io"]
+  resources: ["rdeagents"]
+  verbs: ["get", "list", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["persistentvolumeclaims"]
+  verbs: ["get", "list", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kuberde-server
+  namespace: ${NAMESPACE}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kuberde-server
+subjects:
+- kind: ServiceAccount
+  name: kuberde-server
+  namespace: ${NAMESPACE}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kuberde-server
+  namespace: ${NAMESPACE}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kuberde-server
+  template:
+    metadata:
+      labels:
+        app: kuberde-server
+    spec:
+      serviceAccountName: kuberde-server
+      containers:
+      - name: server
+        image: soloking/kuberde-server:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        env:
+        - name: KEYCLOAK_URL
+          value: "http://keycloak:8080"
+        - name: KEYCLOAK_PUBLIC_URL
+          value: ${KC_FRONTEND_URL}
+        - name: KUBERDE_PUBLIC_URL
+          value: ${KUBERDE_PUBLIC_URL}
+        - name: KUBERDE_AGENT_DOMAIN
+          value: ${KUBERDE_AGENT_DOMAIN}
+        - name: KUBERDE_AGENT_IMAGE
+          value: ${KUBERDE_AGENT_IMAGE}
+        - name: KUBERDE_AGENT_SERVER_URL
+          value: ${KUBERDE_AGENT_SERVER_URL}
+        - name: KUBERDE_AGENT_AUTH_SECRET
+          value: ${KUBERDE_AGENT_AUTH_SECRET}
+        - name: KUBERDE_NAMESPACE
+          value: ${NAMESPACE}
+        - name: KEYCLOAK_ADMIN_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: keycloak-admin-secret
+              key: client-id
+        - name: KEYCLOAK_ADMIN_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: keycloak-admin-secret
+              key: client-secret
+        # PostgreSQL Database Configuration
+        - name: DB_HOST
+          value: "postgresql-service"
+        - name: DB_PORT
+          value: "5432"
+        - name: DB_NAME
+          value: "kuberde"
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-secret
+              key: username
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-secret
+              key: password
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kuberde-server
+  namespace: ${NAMESPACE}
+spec:
+  selector:
+    app: kuberde-server
+  ports:
+  - port: 8080
+    targetPort: 8080
+    name: http
+  type: ClusterIP

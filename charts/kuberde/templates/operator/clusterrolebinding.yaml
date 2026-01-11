@@ -1,0 +1,18 @@
+{{- if .Values.operator.enabled }}
+{{- if .Values.operator.rbac.create }}
+apiVersion: {{ include "rbac.apiVersion" . }}
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kuberde.fullname" . }}-operator-binding
+  labels:
+    {{- include "kuberde.operator.labels" . | nindent 4 }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "kuberde.operator.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ include "kuberde.fullname" . }}-operator-role
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
+{{- end }}
