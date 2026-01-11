@@ -578,10 +578,12 @@ func handleHealthz(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
-		"status": "ok",
+	if err := json.NewEncoder(w).Encode(map[string]string{
+		"status":  "ok",
 		"service": "kuberde-server",
-	})
+	}); err != nil {
+		log.Printf("Failed to encode healthz response: %v", err)
+	}
 }
 
 // handleReadyz handles readiness probe (checks dependencies)
@@ -597,10 +599,12 @@ func handleReadyz(w http.ResponseWriter, r *http.Request) {
 		if err != nil || sqlDB.Ping() != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
-			json.NewEncoder(w).Encode(map[string]string{
+			if err := json.NewEncoder(w).Encode(map[string]string{
 				"status": "not ready",
 				"reason": "database connection failed",
-			})
+			}); err != nil {
+				log.Printf("Failed to encode readyz response: %v", err)
+			}
 			return
 		}
 	}
@@ -609,20 +613,24 @@ func handleReadyz(w http.ResponseWriter, r *http.Request) {
 	if oidcVerifier == nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(map[string]string{
+		if err := json.NewEncoder(w).Encode(map[string]string{
 			"status": "not ready",
 			"reason": "OIDC verifier not initialized",
-		})
+		}); err != nil {
+			log.Printf("Failed to encode readyz response: %v", err)
+		}
 		return
 	}
 
 	// All checks passed
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
-		"status": "ready",
+	if err := json.NewEncoder(w).Encode(map[string]string{
+		"status":  "ready",
 		"service": "kuberde-server",
-	})
+	}); err != nil {
+		log.Printf("Failed to encode readyz response: %v", err)
+	}
 }
 
 func handleLogin(w http.ResponseWriter, r *http.Request) {
