@@ -40,6 +40,7 @@ describe('Agent Templates API', () => {
         ok: true,
         json: async () => mockTemplates,
         status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
       });
 
       const templates = await agentTemplatesApi.list();
@@ -65,6 +66,7 @@ describe('Agent Templates API', () => {
         ok: true,
         json: async () => mockTemplate,
         status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
       });
 
       const template = await agentTemplatesApi.get('tpl-ssh-001');
@@ -77,6 +79,7 @@ describe('Agent Templates API', () => {
         ok: true,
         json: async () => ({}),
         status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
       });
 
       await agentTemplatesApi.delete('custom-tpl-001');
@@ -88,6 +91,7 @@ describe('Agent Templates API', () => {
         ok: false,
         status: 500,
         text: async () => 'Internal Server Error',
+        headers: new Headers({ 'content-type': 'text/plain' }),
       });
 
       await expect(agentTemplatesApi.list()).rejects.toThrow();
@@ -116,6 +120,7 @@ describe('Agent Templates API', () => {
         ok: true,
         json: async () => mockService,
         status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
       });
 
       const service = await servicesApi.create('workspace-001', {
@@ -151,6 +156,7 @@ describe('Agent Templates API', () => {
         ok: true,
         json: async () => mockService,
         status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
       });
 
       const service = await servicesApi.create('workspace-001', {
