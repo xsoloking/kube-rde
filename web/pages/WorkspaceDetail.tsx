@@ -309,13 +309,13 @@ const WorkspaceDetail: React.FC = () => {
                         {new Date(svc.created_at).toLocaleDateString()}
                       </td>
                       <td className="px-6 py-5">
-                        {svc.agent_type === 'ssh' ? (
+                        {svc.agent_type?.toLowerCase().trim() === 'ssh' ? (
                           <Link
                             to={`/services/${svc.id}`}
                             className="inline-flex items-center gap-2 px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary text-[10px] font-bold uppercase tracking-widest rounded-lg border border-primary/20 transition-all"
                           >
                             <span className="material-symbols-outlined text-[16px]">terminal</span>
-                            Access
+                            View Details
                           </Link>
                         ) : (
                           <button
@@ -330,7 +330,7 @@ const WorkspaceDetail: React.FC = () => {
                             <span className="material-symbols-outlined text-[16px]">
                               open_in_new
                             </span>
-                            Access
+                            Open
                           </button>
                         )}
                       </td>

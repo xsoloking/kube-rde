@@ -1,8 +1,8 @@
 package repositories
 
 import (
-	"kuberde/pkg/models"
 	"gorm.io/gorm"
+	"kuberde/pkg/models"
 )
 
 // UserQuotaRepository provides methods for accessing user quotas

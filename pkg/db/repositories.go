@@ -83,6 +83,7 @@ func (r *UserRepository) Count() (int64, error) {
 type WorkspaceRepository struct {
 	db *gorm.DB
 }
+
 // NewWorkspaceRepository creates a new workspace repository
 func NewWorkspaceRepository(db *gorm.DB) *WorkspaceRepository {
 	return &WorkspaceRepository{db: db}
@@ -137,6 +138,7 @@ func (r *WorkspaceRepository) Count() (int64, error) {
 	}
 	return count, nil
 }
+
 // Create creates a new workspace
 func (r *WorkspaceRepository) Create(workspace *models.Workspace) error {
 	if workspace.ID == "" {
@@ -215,9 +217,9 @@ func (r *ServiceRepository) UpdateStatus(id string, status string) error {
 	return r.db.Model(&models.Service{}).
 		Where("id = ?", id).
 		Updates(map[string]interface{}{
-			"status":           status,
-			"last_heartbeat":   now,
-			"updated_at":       now,
+			"status":         status,
+			"last_heartbeat": now,
+			"updated_at":     now,
 		}).Error
 }
 

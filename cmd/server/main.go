@@ -4014,6 +4014,39 @@ func handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 }
 
 // GET /api/workspaces/:id/services - List services in a workspace
+// inferAgentTypeFromService attempts to infer agent type from service characteristics
+func inferAgentTypeFromService(svc *models.Service) string {
+	serviceName := strings.ToLower(svc.Name)
+
+	// Check by common service names
+	if strings.Contains(serviceName, "ssh") {
+		return "ssh"
+	}
+	if strings.Contains(serviceName, "jupyter") {
+		return "jupyter"
+	}
+	if strings.Contains(serviceName, "coder") || strings.Contains(serviceName, "vscode") || strings.Contains(serviceName, "code-server") {
+		return "coder"
+	}
+	if strings.Contains(serviceName, "file") || strings.Contains(serviceName, "filebrowser") {
+		return "file"
+	}
+
+	// Check by port
+	switch svc.ExternalPort {
+	case 22:
+		return "ssh"
+	case 8888:
+		return "jupyter"
+	case 8080, 8443:
+		if strings.Contains(serviceName, "code") {
+			return "coder"
+		}
+	}
+
+	return ""
+}
+
 func handleListWorkspaceServices(w http.ResponseWriter, r *http.Request) {
 	userID, err := extractUserIDFromRequest(r)
 	if err != nil {
@@ -4154,18 +4187,41 @@ func handleListWorkspaceServices(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Convert services to include remote_proxy field
+	// Convert services to include remote_proxy field and ensure agent_type is populated
 	serviceResponses := make([]map[string]interface{}, len(services))
-	for i, svc := range services {
+	for i := range services {
+		// Load template if available to get agent_type
+		if services[i].TemplateID.Valid && !services[i].AgentType.Valid {
+			template, err := dbpkg.AgentTemplateRepo().GetByID(context.TODO(), services[i].TemplateID.String)
+			if err == nil && template != nil {
+				services[i].AgentType = sql.NullString{String: template.AgentType, Valid: true}
+				services[i].Template = template
+			}
+		}
+
+		// For services without template, try to infer agent_type from service name or port
+		if !services[i].AgentType.Valid {
+			inferredType := inferAgentTypeFromService(&services[i])
+			if inferredType != "" {
+				services[i].AgentType = sql.NullString{String: inferredType, Valid: true}
+			}
+		}
+
 		// Marshal service to map
-		svcBytes, _ := json.Marshal(svc)
+		svcBytes, _ := json.Marshal(&services[i])
 		var svcMap map[string]interface{}
 		_ = json.Unmarshal(svcBytes, &svcMap)
 
 		// Add remote_proxy field
-		if svc.AgentID != "" {
-			svcMap["remote_proxy"] = fmt.Sprintf("%s.%s", svc.AgentID, agentDomain)
+		if services[i].AgentID != "" {
+			svcMap["remote_proxy"] = fmt.Sprintf("%s.%s", services[i].AgentID, agentDomain)
 		}
+
+		// Ensure agent_type is always present in response (even if null)
+		if _, exists := svcMap["agent_type"]; !exists && services[i].AgentType.Valid {
+			svcMap["agent_type"] = services[i].AgentType.String
+		}
+
 		serviceResponses[i] = svcMap
 	}
 
@@ -4176,6 +4232,188 @@ func handleListWorkspaceServices(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /api/workspaces/:id/services - Create a service in a workspace
+// extractServiceID gets service ID from query or path
+func extractServiceID(r *http.Request) (string, error) {
+	serviceID := r.URL.Query().Get("id")
+	if serviceID == "" {
+		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/services/"), "/")
+		if len(parts) > 0 && parts[0] != "" {
+			serviceID = parts[0]
+		}
+	}
+	if serviceID == "" {
+		return "", fmt.Errorf("service ID is required")
+	}
+	return serviceID, nil
+}
+
+// extractAgentID gets agent ID from path
+func extractAgentID(r *http.Request) (string, error) {
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/agents/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		return "", fmt.Errorf("agent ID is required")
+	}
+	return parts[0], nil
+}
+
+// validateMethodAndAuth checks HTTP method and returns authenticated user ID
+func validateMethodAndAuth(w http.ResponseWriter, r *http.Request, method string) (string, bool) {
+	if r.Method != method {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return "", false
+	}
+
+	userID, err := extractUserIDFromRequest(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return "", false
+	}
+
+	if db == nil {
+		http.Error(w, "Database not available", http.StatusServiceUnavailable)
+		return "", false
+	}
+
+	return userID, true
+}
+
+// ensureUserExistsInDB verifies user exists and creates if needed from token
+func ensureUserExistsInDB(userID string, r *http.Request) error {
+	if db == nil {
+		return nil
+	}
+
+	userRepo := dbpkg.UserRepo()
+	existingUser, err := userRepo.FindByID(userID)
+	if err != nil {
+		log.Printf("ERROR: Failed to check user existence for %s: %v", userID, err)
+		return fmt.Errorf("failed to verify user account")
+	}
+
+	if existingUser != nil {
+		return nil
+	}
+
+	// User doesn't exist - try to create from token
+	token, err := validateToken(r)
+	if err != nil {
+		token, err = validateCookie(r)
+	}
+	if err != nil {
+		log.Printf("ERROR: User %s not found in database and cannot extract token claims", userID)
+		return fmt.Errorf("user account not found. Please log out and log in again")
+	}
+
+	var claims struct {
+		Subject           string `json:"sub"`
+		PreferredUsername string `json:"preferred_username"`
+		Email             string `json:"email"`
+		Name              string `json:"name"`
+	}
+
+	if err := token.Claims(&claims); err != nil {
+		log.Printf("ERROR: Failed to extract claims from token: %v", err)
+		return fmt.Errorf("invalid authentication token")
+	}
+
+	if err := ensureUserExists(claims.Subject, claims.PreferredUsername, claims.Email, claims.Name); err != nil {
+		log.Printf("ERROR: Failed to create user record for %s: %v", claims.PreferredUsername, err)
+		return fmt.Errorf("failed to create user account. Please contact administrator")
+	}
+
+	log.Printf("✓ Successfully created user record for %s on-demand", claims.PreferredUsername)
+	return nil
+}
+
+// extractWorkspaceID gets workspace ID from query or path
+func extractWorkspaceID(r *http.Request) (string, error) {
+	workspaceID := r.URL.Query().Get("workspace_id")
+	if workspaceID == "" {
+		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/workspaces/"), "/")
+		if len(parts) > 0 {
+			workspaceID = parts[0]
+		}
+	}
+	if workspaceID == "" {
+		return "", fmt.Errorf("workspace ID is required")
+	}
+	return workspaceID, nil
+}
+
+// loadAgentTemplate loads template by ID
+func loadAgentTemplate(templateID string) (*models.AgentTemplate, error) {
+	if templateID == "" {
+		return nil, nil
+	}
+
+	template, err := dbpkg.AgentTemplateRepo().GetByID(context.Background(), templateID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get template: %w", err)
+	}
+	if template == nil {
+		return nil, fmt.Errorf("template not found")
+	}
+
+	return template, nil
+}
+
+// applyTemplateDefaults applies template defaults to service request
+func applyTemplateDefaults(template *models.AgentTemplate, localTarget *string, externalPort *int) {
+	if template == nil {
+		return
+	}
+	if *localTarget == "" {
+		*localTarget = template.DefaultLocalTarget
+	}
+	if *externalPort <= 0 {
+		*externalPort = template.DefaultExternalPort
+	}
+}
+
+// autoLookupGPUConfig automatically fills in GPU resource name and node selector from model
+func autoLookupGPUConfig(gpuModel string, gpuResourceName *string, gpuNodeSelector *map[string]interface{}) {
+	if gpuModel == "" || resourceConfigRepo == nil {
+		return
+	}
+	if *gpuResourceName != "" && len(*gpuNodeSelector) > 0 {
+		return
+	}
+
+	config, err := resourceConfigRepo.GetConfig()
+	if err != nil || config == nil || config.GPUTypes == "" {
+		return
+	}
+
+	var gpuTypes []map[string]interface{}
+	if err := json.Unmarshal([]byte(config.GPUTypes), &gpuTypes); err != nil {
+		return
+	}
+
+	for _, gpuType := range gpuTypes {
+		modelName, ok := gpuType["model_name"].(string)
+		if !ok || modelName != gpuModel {
+			continue
+		}
+
+		if *gpuResourceName == "" {
+			if resourceName, ok := gpuType["resource_name"].(string); ok {
+				*gpuResourceName = resourceName
+			}
+		}
+
+		if len(*gpuNodeSelector) == 0 {
+			labelKey, _ := gpuType["node_label_key"].(string)
+			labelValue, _ := gpuType["node_label_value"].(string)
+			if labelKey != "" && labelValue != "" {
+				*gpuNodeSelector = map[string]interface{}{
+					labelKey: labelValue,
+				}
+			}
+		}
+		break
+	}
+}
+
 func handleCreateWorkspaceService(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -4193,65 +4431,17 @@ func handleCreateWorkspaceService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Safety check: Ensure user exists in database before creating service
-	// This handles cases where ensureUserExists failed during login
-	if db != nil {
-		userRepo := dbpkg.UserRepo()
-		existingUser, err := userRepo.FindByID(userID)
-		if err != nil {
-			log.Printf("ERROR: Failed to check user existence for %s: %v", userID, err)
-			http.Error(w, "Failed to verify user account", http.StatusInternalServerError)
-			return
-		}
-		if existingUser == nil {
-			// User doesn't exist in database - try to create from token claims
-			token, err := validateToken(r)
-			if err != nil {
-				token, err = validateCookie(r)
-			}
-			if err == nil {
-				var claims struct {
-					Subject           string `json:"sub"`
-					PreferredUsername string `json:"preferred_username"`
-					Email             string `json:"email"`
-					Name              string `json:"name"`
-				}
-				if err := token.Claims(&claims); err == nil {
-					// Attempt to create user record
-					if err := ensureUserExists(claims.Subject, claims.PreferredUsername, claims.Email, claims.Name); err != nil {
-						log.Printf("ERROR: Failed to create user record for %s: %v", claims.PreferredUsername, err)
-						http.Error(w, "Failed to create user account. Please contact administrator.", http.StatusInternalServerError)
-						return
-					}
-					log.Printf("✓ Successfully created user record for %s on-demand", claims.PreferredUsername)
-				} else {
-					log.Printf("ERROR: Failed to extract claims from token: %v", err)
-					http.Error(w, "Invalid authentication token", http.StatusUnauthorized)
-					return
-				}
-			} else {
-				log.Printf("ERROR: User %s not found in database and cannot extract token claims", userID)
-				http.Error(w, "User account not found. Please log out and log in again.", http.StatusUnauthorized)
-				return
-			}
-		}
-	}
-
-	// Extract workspace ID
-	workspaceID := r.URL.Query().Get("workspace_id")
-	if workspaceID == "" {
-		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/workspaces/"), "/")
-		if len(parts) > 0 {
-			workspaceID = parts[0]
-		}
-	}
-
-	if workspaceID == "" {
-		http.Error(w, "Workspace ID is required", http.StatusBadRequest)
+	if err := ensureUserExistsInDB(userID, r); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Check workspace ownership
+	workspaceID, err := extractWorkspaceID(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	owns, err := userOwnsWorkspace(userID, workspaceID)
 	if err != nil {
 		http.Error(w, "Workspace not found", http.StatusNotFound)
@@ -4290,36 +4480,19 @@ func handleCreateWorkspaceService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If template_id is provided, load template and use its defaults
-	var template *models.AgentTemplate
-	if req.TemplateID != "" {
-		var err error
-		template, err = dbpkg.AgentTemplateRepo().GetByID(context.Background(), req.TemplateID)
-		if err != nil {
-			http.Error(w, "Failed to get template: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if template == nil {
-			http.Error(w, "Template not found", http.StatusNotFound)
-			return
-		}
-
-		// Use template defaults if not provided
-		if req.LocalTarget == "" {
-			req.LocalTarget = template.DefaultLocalTarget
-		}
-		if req.ExternalPort <= 0 {
-			req.ExternalPort = template.DefaultExternalPort
-		}
+	template, err := loadAgentTemplate(req.TemplateID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
-	// Validate required fields
+	applyTemplateDefaults(template, &req.LocalTarget, &req.ExternalPort)
+
 	if req.LocalTarget == "" || req.ExternalPort <= 0 {
 		http.Error(w, "local_target and external_port are required (either in request or from template)", http.StatusBadRequest)
 		return
 	}
 
-	// Convert env_vars to JSON
 	var envVarsJSON *json.RawMessage
 	if req.EnvVars != nil {
 		envVarsBytes, err := json.Marshal(req.EnvVars)
@@ -4331,42 +4504,7 @@ func handleCreateWorkspaceService(w http.ResponseWriter, r *http.Request) {
 		envVarsJSON = &raw
 	}
 
-	// Auto-lookup GPU configuration if only model is provided
-	if req.GPUModel != "" && (req.GPUResourceName == "" || len(req.GPUNodeSelector) == 0) {
-		// Get resource config to lookup GPU types
-		if resourceConfigRepo != nil {
-			config, err := resourceConfigRepo.GetConfig()
-			if err == nil && config != nil && config.GPUTypes != "" {
-				// Parse GPU types
-				var gpuTypes []map[string]interface{}
-				gpuTypesBytes := []byte(config.GPUTypes)
-				_ = json.Unmarshal(gpuTypesBytes, &gpuTypes)
-
-				// Find matching GPU type by model_name
-				for _, gpuType := range gpuTypes {
-					if modelName, ok := gpuType["model_name"].(string); ok && modelName == req.GPUModel {
-						// Set resource_name if not provided
-						if req.GPUResourceName == "" {
-							if resourceName, ok := gpuType["resource_name"].(string); ok {
-								req.GPUResourceName = resourceName
-							}
-						}
-						// Set node_selector if not provided
-						if len(req.GPUNodeSelector) == 0 {
-							labelKey, _ := gpuType["node_label_key"].(string)
-							labelValue, _ := gpuType["node_label_value"].(string)
-							if labelKey != "" && labelValue != "" {
-								req.GPUNodeSelector = map[string]interface{}{
-									labelKey: labelValue,
-								}
-							}
-						}
-						break
-					}
-				}
-			}
-		}
-	}
+	autoLookupGPUConfig(req.GPUModel, &req.GPUResourceName, &req.GPUNodeSelector)
 
 	// Convert GPU node selector to JSON if provided
 	var gpuNodeSelectorJSON *json.RawMessage
@@ -6750,56 +6888,46 @@ func handleListAuditLogs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func main() {
-	initAuth()
+// getDatabaseConfig retrieves database configuration from environment with defaults
+func getDatabaseConfig() (host, port, user, password, database string) {
+	host = os.Getenv("DB_HOST")
+	port = os.Getenv("DB_PORT")
+	user = os.Getenv("DB_USER")
+	password = os.Getenv("DB_PASSWORD")
+	database = os.Getenv("DB_NAME")
 
-	// Initialize Keycloak admin client for user management
-	if err := initKeycloakAdmin(); err != nil {
-		log.Printf("WARNING: Failed to initialize Keycloak admin client: %v. User management will be unavailable.", err)
+	if host == "" {
+		host = "postgresql"
 	}
+	if port == "" {
+		port = "5432"
+	}
+	if user == "" {
+		user = "postgres"
+	}
+	if database == "" {
+		database = "kuberde"
+	}
+	return
+}
 
-	go runActivityMonitor()
-
-	// Initialize PostgreSQL Database
-	var err error
-	pgHost := os.Getenv("DB_HOST")
-	pgPort := os.Getenv("DB_PORT")
-	pgUser := os.Getenv("DB_USER")
-	pgPassword := os.Getenv("DB_PASSWORD")
-	pgDatabase := os.Getenv("DB_NAME")
-
-	// Use defaults if not set
-	if pgHost == "" {
-		pgHost = "postgresql"
-	}
-	if pgPort == "" {
-		pgPort = "5432"
-	}
-	if pgUser == "" {
-		pgUser = "postgres"
-	}
-	if pgDatabase == "" {
-		pgDatabase = "kuberde"
-	}
-
-	// Build PostgreSQL DSN
+// initDatabase initializes PostgreSQL database connection with retry logic
+func initDatabase() error {
+	pgHost, pgPort, pgUser, pgPassword, pgDatabase := getDatabaseConfig()
 	pgDSN := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		pgHost, pgPort, pgUser, pgPassword, pgDatabase)
 
-	// Initialize database connection with retry logic (3 attempts)
 	maxDBRetries := 3
 	var dbErr error
 	for i := 0; i < maxDBRetries; i++ {
 		dbErr = dbpkg.InitDB(pgDSN)
 		if dbErr == nil {
 			log.Println("✓ PostgreSQL database initialized")
-			db = dbpkg.DB // Set the global db variable
-
-			// Initialize repository instances
+			db = dbpkg.DB
 			resourceConfigRepo = repositories.NewResourceConfigRepository(db)
 			userQuotaRepo = repositories.NewUserQuotaRepository(db)
 			log.Println("✓ Repository instances initialized")
-			break
+			return nil
 		}
 
 		if i < maxDBRetries-1 {
@@ -6807,182 +6935,220 @@ func main() {
 			time.Sleep(5 * time.Second)
 		}
 	}
+	return fmt.Errorf("failed to initialize PostgreSQL database after %d retries: %v", maxDBRetries, dbErr)
+}
 
-	if dbErr != nil {
-		log.Fatalf("FATAL: Failed to initialize PostgreSQL database after %d retries: %v. Pod will restart.", maxDBRetries, dbErr)
-	}
-
-	// Initialize Kubernetes client
+// initKubernetes initializes Kubernetes clients
+func initKubernetes() {
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		log.Printf("WARNING: Failed to get in-cluster config: %v. Scale-up will be disabled.", err)
-		// Don't fatal, allow server to run without scale-up
-	} else {
-		k8sClientset, err = kubernetes.NewForConfig(config)
-		if err != nil {
-			log.Printf("WARNING: Failed to create K8s client: %v. Scale-up will be disabled.", err)
-		} else {
-			log.Println("Kubernetes client initialized for auto-scaling")
-		}
+		return
+	}
 
-		// Init Dynamic Client
-		dynamicClient, err = dynamic.NewForConfig(config)
-		if err != nil {
-			log.Printf("WARNING: Failed to create Dynamic client: %v. API operations will fail.", err)
+	k8sClientset, err = kubernetes.NewForConfig(config)
+	if err != nil {
+		log.Printf("WARNING: Failed to create K8s client: %v. Scale-up will be disabled.", err)
+		return
+	}
+	log.Println("Kubernetes client initialized for auto-scaling")
+
+	dynamicClient, err = dynamic.NewForConfig(config)
+	if err != nil {
+		log.Printf("WARNING: Failed to create Dynamic client: %v. API operations will fail.", err)
+	}
+}
+
+// routeHTTPRequest routes HTTP requests to appropriate handlers
+func routeHTTPRequest(w http.ResponseWriter, r *http.Request) {
+	log.Printf("%s %s", r.Method, r.URL.Path)
+
+	host := r.Host
+	if strings.Contains(host, ":") {
+		host, _, _ = net.SplitHostPort(host)
+	}
+
+	if strings.HasSuffix(host, getAgentDomainSuffix()) {
+		handleSubdomainProxy(w, r)
+		return
+	}
+
+	routeMainDomain(w, r)
+}
+
+// routeMainDomain handles routing for main domain requests
+func routeMainDomain(w http.ResponseWriter, r *http.Request) {
+	switch {
+	case r.URL.Path == "/healthz" || r.URL.Path == "/livez":
+		handleHealthz(w, r)
+	case r.URL.Path == "/readyz":
+		handleReadyz(w, r)
+	case r.URL.Path == "/auth/login":
+		handleLogin(w, r)
+	case r.URL.Path == "/auth/callback":
+		handleCallback(w, r)
+	case r.URL.Path == "/auth/logout":
+		handleLogout(w, r)
+	case r.URL.Path == "/auth/refresh":
+		handleRefreshToken(w, r)
+	case r.URL.Path == "/api/me":
+		handleGetCurrentUser(w, r)
+	case r.URL.Path == "/api/system-config":
+		handleGetSystemConfig(w, r)
+	case r.URL.Path == "/api/users":
+		handleUsers(w, r)
+	case strings.HasPrefix(r.URL.Path, "/api/users/"):
+		handleUserDetail(w, r)
+	case strings.HasPrefix(r.URL.Path, "/ws"):
+		handleAgent(w, r)
+	case strings.HasPrefix(r.URL.Path, "/connect/"):
+		handleUserConnect(w, r)
+	case strings.HasPrefix(r.URL.Path, "/mgmt/"):
+		handleMgmtAgentStats(w, r)
+	case strings.HasPrefix(r.URL.Path, "/api/agents/") && strings.Contains(r.URL.Path, "/scale-up"):
+		handleScaleUpAgent(w, r)
+	case strings.HasPrefix(r.URL.Path, "/api/agents/") && strings.Contains(r.URL.Path, "/stop"):
+		handleStopAgent(w, r)
+	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/agents/"):
+		handleDeleteAgent(w, r)
+	case r.URL.Path == "/api/agents":
+		if r.Method == http.MethodPost {
+			handleCreateAgent(w, r)
+		} else {
+			handleListAgents(w, r)
+		}
+	case r.URL.Path == "/api/stats":
+		handleGetGlobalStats(w, r)
+	case r.URL.Path == "/api/connections":
+		handleGetConnections(w, r)
+	case r.URL.Path == "/api/traffic":
+		handleGetTraffic(w, r)
+	case r.URL.Path == "/api/events":
+		handleGetEvents(w, r)
+	case strings.HasPrefix(r.URL.Path, "/api/agents/") && strings.HasSuffix(r.URL.Path, "/logs"):
+		handleGetLogs(w, r)
+	case r.URL.Path == "/api/workspaces":
+		if r.Method == http.MethodPost {
+			handleCreateWorkspace(w, r)
+		} else {
+			handleListWorkspaces(w, r)
+		}
+	case strings.HasPrefix(r.URL.Path, "/api/workspaces/") && strings.HasSuffix(r.URL.Path, "/services"):
+		if r.Method == http.MethodPost {
+			handleCreateWorkspaceService(w, r)
+		} else {
+			handleListWorkspaceServices(w, r)
+		}
+	case strings.HasPrefix(r.URL.Path, "/api/workspaces/"):
+		routeWorkspaceRequest(w, r)
+	case r.URL.Path == "/api/services" || strings.HasPrefix(r.URL.Path, "/api/services/"):
+		routeServiceRequest(w, r)
+	case r.URL.Path == "/api/admin/resource-config":
+		routeAdminResourceConfig(w, r)
+	case r.URL.Path == "/api/agent-templates/export":
+		handleExportAllTemplates(w, r)
+	case r.URL.Path == "/api/agent-templates/import":
+		handleImportTemplates(w, r)
+	case strings.HasPrefix(r.URL.Path, "/api/agent-templates/") && strings.HasSuffix(r.URL.Path, "/export"):
+		handleExportSingleTemplate(w, r)
+	case r.URL.Path == "/api/agent-templates" || strings.HasPrefix(r.URL.Path, "/api/agent-templates/"):
+		handleGetAgentTemplates(w, r)
+	case r.URL.Path == "/api/admin/workspaces":
+		requireRole("admin")(handleAdminListWorkspaces)(w, r)
+	case r.URL.Path == "/api/admin/stats":
+		requireRole("admin")(handleGetAdminStats)(w, r)
+	case strings.HasPrefix(r.URL.Path, "/api/admin/audit-logs"):
+		requireRole("admin")(handleListAuditLogs)(w, r)
+	case strings.HasPrefix(r.URL.Path, "/download/cli/"):
+		handleDownloadCLI(w, r)
+	default:
+		_, _ = fmt.Fprintf(w, "<h1>FRP Server</h1><p>Logged in? Check cookie.</p><a href='/auth/login'>Login</a>")
+	}
+}
+
+// routeWorkspaceRequest handles workspace-specific routing
+func routeWorkspaceRequest(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		handleGetWorkspace(w, r)
+	case http.MethodDelete:
+		handleDeleteWorkspace(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// routeServiceRequest handles service-specific routing
+func routeServiceRequest(w http.ResponseWriter, r *http.Request) {
+	if strings.Contains(r.URL.Path, "/restart") && r.Method == http.MethodPut {
+		handleRestartService(w, r)
+		return
+	}
+	if strings.Contains(r.URL.Path, "/stop") && r.Method == http.MethodPut {
+		handleStopService(w, r)
+		return
+	}
+	if strings.Contains(r.URL.Path, "/start") && r.Method == http.MethodPut {
+		handleStartService(w, r)
+		return
+	}
+	if strings.Contains(r.URL.Path, "/logs") && r.Method == http.MethodGet {
+		handleGetServiceLogs(w, r)
+		return
+	}
+
+	serviceID := r.URL.Query().Get("id")
+	if serviceID == "" {
+		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/services/"), "/")
+		if len(parts) > 0 && parts[0] != "" {
+			serviceID = parts[0]
 		}
 	}
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// Log Request
-		log.Printf("%s %s", r.Method, r.URL.Path)
-
-		host := r.Host
-		if strings.Contains(host, ":") {
-			host, _, _ = net.SplitHostPort(host)
+	switch r.Method {
+	case http.MethodGet:
+		if serviceID != "" {
+			handleGetService(w, r, serviceID)
+		} else {
+			http.Error(w, "Service ID required", http.StatusBadRequest)
 		}
+	case http.MethodPut:
+		handleUpdateService(w, r)
+	case http.MethodDelete:
+		handleDeleteService(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
 
-		// Check if this is an agent subdomain (e.g., user-alice-dev.frp.byai.uk)
-		if strings.HasSuffix(host, getAgentDomainSuffix()) {
-			// Subdomain Proxy - route to agent
-			handleSubdomainProxy(w, r)
-			return
-		}
+// routeAdminResourceConfig handles admin resource configuration routing
+func routeAdminResourceConfig(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		requireRole("admin")(handleGetResourceConfig)(w, r)
+	case http.MethodPut:
+		requireRole("admin")(handleUpdateResourceConfig)(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
 
-		// Main Domain Logic (Public or Internal)
-		switch {
-		// Health check endpoints (public, no auth required)
-		case r.URL.Path == "/healthz" || r.URL.Path == "/livez":
-			handleHealthz(w, r)
-		case r.URL.Path == "/readyz":
-			handleReadyz(w, r)
-		case r.URL.Path == "/auth/login":
-			handleLogin(w, r)
-		case r.URL.Path == "/auth/callback":
-			handleCallback(w, r)
-		case r.URL.Path == "/auth/logout":
-			handleLogout(w, r)
-		case r.URL.Path == "/auth/refresh":
-			handleRefreshToken(w, r)
-		case r.URL.Path == "/api/me":
-			handleGetCurrentUser(w, r)
-		case r.URL.Path == "/api/system-config":
-			handleGetSystemConfig(w, r)
-		case r.URL.Path == "/api/users":
-			handleUsers(w, r)
-		case strings.HasPrefix(r.URL.Path, "/api/users/"):
-			handleUserDetail(w, r)
-		case strings.HasPrefix(r.URL.Path, "/ws"):
-			handleAgent(w, r)
-		case strings.HasPrefix(r.URL.Path, "/connect/"):
-			handleUserConnect(w, r)
-		case strings.HasPrefix(r.URL.Path, "/mgmt/"):
-			handleMgmtAgentStats(w, r)
-		case strings.HasPrefix(r.URL.Path, "/api/agents/") && strings.Contains(r.URL.Path, "/scale-up"):
-			handleScaleUpAgent(w, r)
-		case strings.HasPrefix(r.URL.Path, "/api/agents/") && strings.Contains(r.URL.Path, "/stop"):
-			handleStopAgent(w, r)
-		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/agents/"):
-			handleDeleteAgent(w, r)
-		case r.URL.Path == "/api/agents":
-			if r.Method == http.MethodPost {
-				handleCreateAgent(w, r)
-			} else {
-				handleListAgents(w, r)
-			}
-		case r.URL.Path == "/api/stats":
-			handleGetGlobalStats(w, r)
-		case r.URL.Path == "/api/connections":
-			handleGetConnections(w, r)
-		case r.URL.Path == "/api/traffic":
-			handleGetTraffic(w, r)
-		case r.URL.Path == "/api/events":
-			handleGetEvents(w, r)
-		case strings.HasPrefix(r.URL.Path, "/api/agents/") && strings.HasSuffix(r.URL.Path, "/logs"):
-			handleGetLogs(w, r)
-		// Phase 3: Workspace & Service API endpoints
-		case r.URL.Path == "/api/workspaces":
-			if r.Method == http.MethodPost {
-				handleCreateWorkspace(w, r)
-			} else {
-				handleListWorkspaces(w, r)
-			}
-		case strings.HasPrefix(r.URL.Path, "/api/workspaces/") && strings.HasSuffix(r.URL.Path, "/services"):
-			if r.Method == http.MethodPost {
-				handleCreateWorkspaceService(w, r)
-			} else {
-				handleListWorkspaceServices(w, r)
-			}
-		case strings.HasPrefix(r.URL.Path, "/api/workspaces/"):
-			// Handle /api/workspaces/{id} - GET, DELETE single workspace
-			switch r.Method {
-			case http.MethodGet:
-				handleGetWorkspace(w, r)
-			case http.MethodDelete:
-				handleDeleteWorkspace(w, r)
-			default:
-				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			}
-		case r.URL.Path == "/api/services" || strings.HasPrefix(r.URL.Path, "/api/services/"):
-			// Check for specific service actions first
-			if strings.Contains(r.URL.Path, "/restart") && r.Method == http.MethodPut {
-				handleRestartService(w, r)
-			} else if strings.Contains(r.URL.Path, "/stop") && r.Method == http.MethodPut {
-				handleStopService(w, r)
-			} else if strings.Contains(r.URL.Path, "/start") && r.Method == http.MethodPut {
-				handleStartService(w, r)
-			} else if strings.Contains(r.URL.Path, "/logs") && r.Method == http.MethodGet {
-				handleGetServiceLogs(w, r)
-			} else {
-				// Handle generic service operations
-				serviceID := r.URL.Query().Get("id")
-				if serviceID == "" {
-					parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/services/"), "/")
-					if len(parts) > 0 && parts[0] != "" {
-						serviceID = parts[0]
-					}
-				}
+func main() {
+	initAuth()
 
-				if r.Method == http.MethodGet && serviceID != "" {
-					handleGetService(w, r, serviceID)
-				} else if r.Method == http.MethodPut {
-					handleUpdateService(w, r)
-				} else if r.Method == http.MethodDelete {
-					handleDeleteService(w, r)
-				} else {
-					http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-				}
-			}
-		case r.URL.Path == "/api/admin/resource-config":
-			// Admin-only resource configuration endpoint
-			switch r.Method {
-			case http.MethodGet:
-				requireRole("admin")(handleGetResourceConfig)(w, r)
-			case http.MethodPut:
-				requireRole("admin")(handleUpdateResourceConfig)(w, r)
-			default:
-				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			}
-		case r.URL.Path == "/api/agent-templates/export":
-			handleExportAllTemplates(w, r)
-		case r.URL.Path == "/api/agent-templates/import":
-			handleImportTemplates(w, r)
-		case strings.HasPrefix(r.URL.Path, "/api/agent-templates/") && strings.HasSuffix(r.URL.Path, "/export"):
-			handleExportSingleTemplate(w, r)
-		case r.URL.Path == "/api/agent-templates" || strings.HasPrefix(r.URL.Path, "/api/agent-templates/"):
-			handleGetAgentTemplates(w, r)
-		case r.URL.Path == "/api/admin/workspaces":
-			requireRole("admin")(handleAdminListWorkspaces)(w, r)
-		case r.URL.Path == "/api/admin/stats":
-			requireRole("admin")(handleGetAdminStats)(w, r)
-		case strings.HasPrefix(r.URL.Path, "/api/admin/audit-logs"):
-			requireRole("admin")(handleListAuditLogs)(w, r)
-		case strings.HasPrefix(r.URL.Path, "/download/cli/"):
-			handleDownloadCLI(w, r)
-		default:
-			// Simple Dashboard
-			_, _ = fmt.Fprintf(w, "<h1>FRP Server</h1><p>Logged in? Check cookie.</p><a href='/auth/login'>Login</a>")
-		}
-	})
+	if err := initKeycloakAdmin(); err != nil {
+		log.Printf("WARNING: Failed to initialize Keycloak admin client: %v. User management will be unavailable.", err)
+	}
+
+	go runActivityMonitor()
+
+	if err := initDatabase(); err != nil {
+		log.Fatalf("FATAL: %v. Pod will restart.", err)
+	}
+
+	initKubernetes()
+
+	http.HandleFunc("/", routeHTTPRequest)
 
 	// Configure HTTP server with increased timeouts for large file transfers
 	server := &http.Server{

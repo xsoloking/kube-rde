@@ -1,8 +1,8 @@
 package repositories
 
 import (
-	"kuberde/pkg/models"
 	"gorm.io/gorm"
+	"kuberde/pkg/models"
 )
 
 // ResourceConfigRepository provides methods for accessing resource configuration

@@ -246,7 +246,7 @@ const ServiceCreate: React.FC = () => {
           <h1 className="text-4xl font-bold tracking-tight mb-2">Create New Service</h1>
           <p className="text-text-secondary text-base font-light leading-relaxed">
             {selectedTemplate
-              ? selectedTemplate.agent_type === 'ssh' &&
+              ? selectedTemplate.agent_type?.toLowerCase().trim() === 'ssh' &&
                 (!user?.ssh_keys || user.ssh_keys.length === 0)
                 ? 'Add SSH key to continue'
                 : `Configure your ${selectedTemplate.name}`
@@ -335,7 +335,7 @@ const ServiceCreate: React.FC = () => {
         /* Configuration Form */
         <form onSubmit={handleCreate} className="space-y-6">
           {/* SSH Key Warning for SSH Services */}
-          {selectedTemplate.agent_type === 'ssh' &&
+          {selectedTemplate.agent_type?.toLowerCase().trim() === 'ssh' &&
             (!user?.ssh_keys || user.ssh_keys.length === 0) && (
               <section className="bg-amber-500/10 rounded-2xl border border-amber-500/30 p-6 shadow-xl animate-fade-in">
                 <div className="flex items-start gap-4">
@@ -457,7 +457,7 @@ const ServiceCreate: React.FC = () => {
             )}
 
           {/* SSH Key Success Message */}
-          {selectedTemplate.agent_type === 'ssh' && user?.ssh_keys && user.ssh_keys.length > 0 && (
+          {selectedTemplate.agent_type?.toLowerCase().trim() === 'ssh' && user?.ssh_keys && user.ssh_keys.length > 0 && (
             <section className="bg-emerald-500/10 rounded-2xl border border-emerald-500/30 p-5 shadow-xl animate-fade-in">
               <div className="flex items-center gap-3">
                 <div className="size-8 rounded-lg bg-emerald-500/20 flex items-center justify-center">

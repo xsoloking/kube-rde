@@ -255,12 +255,165 @@ func (c *Controller) onDelete(obj interface{}) {
 	// K8s OwnerReferences will handle Deployment deletion automatically
 }
 
+// workloadContainerConfig holds parsed workload container configuration
+type workloadContainerConfig struct {
+	image           string
+	command         []string
+	args            []string
+	ports           []corev1.ContainerPort
+	imagePullPolicy corev1.PullPolicy
+	env             []corev1.EnvVar
+	resources       corev1.ResourceRequirements
+	securityContext *corev1.SecurityContext
+	volumeMounts    []corev1.VolumeMount
+}
+
+// parseWorkloadContainer extracts and validates workload container configuration
+func (c *Controller) parseWorkloadContainer(cr *unstructured.Unstructured, name string) (*workloadContainerConfig, error) {
+	workloadContainer, found, _ := unstructured.NestedMap(cr.Object, "spec", "workloadContainer")
+	if !found {
+		return nil, fmt.Errorf("workloadContainer is required")
+	}
+
+	config := &workloadContainerConfig{}
+
+	image, _ := workloadContainer["image"].(string)
+	if image == "" {
+		log.Printf("Error: workloadContainer.image is required for agent %s", name)
+		return nil, fmt.Errorf("workloadContainer.image is required")
+	}
+	config.image = image
+
+	config.command = c.extractStringSlice(workloadContainer, "command")
+	config.args = c.extractStringSlice(workloadContainer, "args")
+	config.ports = c.extractContainerPorts(workloadContainer, name)
+	config.imagePullPolicy = c.extractImagePullPolicy(workloadContainer)
+	config.env = c.extractEnvVars(workloadContainer, name)
+	config.resources = c.extractResources(workloadContainer)
+	config.securityContext = c.extractSecurityContext(workloadContainer, name)
+
+	return config, nil
+}
+
+// extractStringSlice extracts a string slice from a map
+func (c *Controller) extractStringSlice(m map[string]interface{}, key string) []string {
+	var result []string
+	if slice, found := m[key].([]interface{}); found {
+		for _, item := range slice {
+			if s, ok := item.(string); ok {
+				result = append(result, s)
+			}
+		}
+	}
+	return result
+}
+
+// extractContainerPorts extracts container ports from workload container spec
+func (c *Controller) extractContainerPorts(workloadContainer map[string]interface{}, name string) []corev1.ContainerPort {
+	var ports []corev1.ContainerPort
+	portsList, found := workloadContainer["ports"].([]interface{})
+	if !found {
+		log.Printf("No ports found in CR for %s, defaulting to 8080", name)
+		return []corev1.ContainerPort{{ContainerPort: 8080}}
+	}
+
+	for _, p := range portsList {
+		portMap, ok := p.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		containerPort := c.extractInt32Port(portMap["containerPort"])
+		if containerPort <= 0 {
+			continue
+		}
+
+		portObj := corev1.ContainerPort{ContainerPort: containerPort}
+		if name, ok := portMap["name"].(string); ok && name != "" {
+			portObj.Name = name
+		}
+		if protocol, ok := portMap["protocol"].(string); ok && protocol != "" {
+			portObj.Protocol = corev1.Protocol(protocol)
+		}
+		ports = append(ports, portObj)
+		log.Printf("Extracted port %d for container from CR", containerPort)
+	}
+
+	if len(ports) == 0 {
+		log.Printf("No valid ports found in CR for %s, defaulting to 8080", name)
+		return []corev1.ContainerPort{{ContainerPort: 8080}}
+	}
+
+	log.Printf("Using ports from CR for %s: %+v", name, ports)
+	return ports
+}
+
+// extractInt32Port converts various numeric types to int32
+func (c *Controller) extractInt32Port(val interface{}) int32 {
+	switch v := val.(type) {
+	case float64:
+		return int32(v)
+	case int64:
+		return int32(v)
+	case int:
+		return int32(v)
+	default:
+		return 0
+	}
+}
+
+// extractImagePullPolicy extracts image pull policy from workload container
+func (c *Controller) extractImagePullPolicy(workloadContainer map[string]interface{}) corev1.PullPolicy {
+	if policy, found := workloadContainer["imagePullPolicy"].(string); found {
+		return corev1.PullPolicy(policy)
+	}
+	return corev1.PullIfNotPresent
+}
+
+// extractEnvVars extracts environment variables from workload container
+func (c *Controller) extractEnvVars(workloadContainer map[string]interface{}, name string) []corev1.EnvVar {
+	var env []corev1.EnvVar
+	wcEnvList, found := workloadContainer["env"].([]interface{})
+	if !found {
+		return env
+	}
+
+	for _, e := range wcEnvList {
+		envMap, ok := e.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		envName, _ := envMap["name"].(string)
+		envValue, _ := envMap["value"].(string)
+		if envName != "" {
+			env = append(env, corev1.EnvVar{Name: envName, Value: envValue})
+			log.Printf("Extracted env var from workloadContainer for %s: %s", name, envName)
+		}
+	}
+	return env
+}
+
+// extractResources extracts resource requirements from workload container
+func (c *Controller) extractResources(workloadContainer map[string]interface{}) corev1.ResourceRequirements {
+	if resMap, found := workloadContainer["resources"].(map[string]interface{}); found {
+		return c.parseResources(resMap)
+	}
+	return corev1.ResourceRequirements{}
+}
+
+// extractSecurityContext extracts security context from workload container
+func (c *Controller) extractSecurityContext(workloadContainer map[string]interface{}, name string) *corev1.SecurityContext {
+	if scMap, found := workloadContainer["securityContext"].(map[string]interface{}); found {
+		log.Printf("Extracted securityContext from workloadContainer for %s: %+v", name, scMap)
+		return c.parseSecurityContext(scMap)
+	}
+	return nil
+}
+
 func (c *Controller) reconcileDeployment(cr *unstructured.Unstructured) error {
-
 	spec, _, _ := unstructured.NestedMap(cr.Object, "spec")
-
 	name := cr.GetName()
-
 	namespace := cr.GetNamespace()
 
 	serverUrl, _ := spec["serverUrl"].(string)
@@ -272,113 +425,10 @@ func (c *Controller) reconcileDeployment(cr *unstructured.Unstructured) error {
 		localTarget = "localhost:80"
 	}
 
-	// Parse workloadContainer spec (required in v1beta1)
-	var workloadContainer map[string]interface{}
-	if wc, found, _ := unstructured.NestedMap(cr.Object, "spec", "workloadContainer"); found {
-		workloadContainer = wc
-	}
-
-	// Extract container image from workloadContainer (required)
-	image, _ := workloadContainer["image"].(string)
-	if image == "" {
-		log.Printf("Error: workloadContainer.image is required for agent %s", name)
-		return fmt.Errorf("workloadContainer.image is required")
-	}
-
-	// Extract command from workloadContainer
-	var workloadCommandSlice []string
-	if cmd, found := workloadContainer["command"].([]interface{}); found {
-		for _, c := range cmd {
-			if s, ok := c.(string); ok {
-				workloadCommandSlice = append(workloadCommandSlice, s)
-			}
-		}
-	}
-
-	// Extract args from workloadContainer
-	var workloadArgsSlice []string
-	if args, found := workloadContainer["args"].([]interface{}); found {
-		for _, a := range args {
-			if s, ok := a.(string); ok {
-				workloadArgsSlice = append(workloadArgsSlice, s)
-			}
-		}
-	}
-
-	// Extract ports from workloadContainer
-	var ports []corev1.ContainerPort
-	if portsList, found := workloadContainer["ports"].([]interface{}); found {
-		for _, p := range portsList {
-			if portMap, ok := p.(map[string]interface{}); ok {
-				// Handle containerPort as either float64 or int64
-				var containerPort int32
-				if cp, ok := portMap["containerPort"].(float64); ok {
-					containerPort = int32(cp)
-				} else if cp, ok := portMap["containerPort"].(int64); ok {
-					containerPort = int32(cp)
-				} else if cp, ok := portMap["containerPort"].(int); ok {
-					containerPort = int32(cp)
-				}
-
-				if containerPort > 0 {
-					portObj := corev1.ContainerPort{
-						ContainerPort: containerPort,
-					}
-					// Copy optional name and protocol
-					if name, ok := portMap["name"].(string); ok && name != "" {
-						portObj.Name = name
-					}
-					if protocol, ok := portMap["protocol"].(string); ok && protocol != "" {
-						portObj.Protocol = corev1.Protocol(protocol)
-					}
-					ports = append(ports, portObj)
-					log.Printf("Extracted port %d for container from CR", containerPort)
-				}
-			}
-		}
-	}
-
-	// If no ports specified, default to 8080
-	if len(ports) == 0 {
-		log.Printf("No ports found in CR for %s, defaulting to 8080", name)
-		ports = []corev1.ContainerPort{{ContainerPort: 8080}}
-	} else {
-		log.Printf("Using ports from CR for %s: %+v", name, ports)
-	}
-
-	// Extract imagePullPolicy from workloadContainer
-	imagePullPolicy := corev1.PullIfNotPresent
-	if policy, found := workloadContainer["imagePullPolicy"].(string); found {
-		imagePullPolicy = corev1.PullPolicy(policy)
-	}
-
-	// Extract environment variables from workloadContainer.env
-	// These override spec.env for workload-specific configuration
-	var workloadContainerEnv []corev1.EnvVar
-	if wcEnvList, found := workloadContainer["env"].([]interface{}); found {
-		for _, e := range wcEnvList {
-			if envMap, ok := e.(map[string]interface{}); ok {
-				envName, _ := envMap["name"].(string)
-				envValue, _ := envMap["value"].(string)
-				if envName != "" {
-					workloadContainerEnv = append(workloadContainerEnv, corev1.EnvVar{Name: envName, Value: envValue})
-					log.Printf("Extracted env var from workloadContainer for %s: %s", name, envName)
-				}
-			}
-		}
-	}
-
-	// Extract resources from workloadContainer
-	var resources corev1.ResourceRequirements
-	if resMap, found := workloadContainer["resources"].(map[string]interface{}); found {
-		resources = c.parseResources(resMap)
-	}
-
-	// Extract securityContext from workloadContainer
-	var securityContext *corev1.SecurityContext
-	if scMap, found := workloadContainer["securityContext"].(map[string]interface{}); found {
-		securityContext = c.parseSecurityContext(scMap)
-		log.Printf("Extracted securityContext from workloadContainer for %s: %+v", name, scMap)
+	// Parse workload container configuration
+	workloadConfig, err := c.parseWorkloadContainer(cr, name)
+	if err != nil {
+		return err
 	}
 
 	// Construct Agent ID and Deployment Name
@@ -420,15 +470,15 @@ func (c *Controller) reconcileDeployment(cr *unstructured.Unstructured) error {
 
 	// Merge workloadContainer.env into workloadEnv
 	// workloadContainer.env values override spec.env values for the same variable name
-	if len(workloadContainerEnv) > 0 {
+	if len(workloadConfig.env) > 0 {
 		// Create a map of existing env vars for quick lookup
 		envMap := make(map[string]corev1.EnvVar)
 		for _, ev := range workloadEnv {
 			envMap[ev.Name] = ev
 		}
 
-		// Merge workloadContainerEnv, overriding existing values
-		for _, wcEnv := range workloadContainerEnv {
+		// Merge workloadConfig.env, overriding existing values
+		for _, wcEnv := range workloadConfig.env {
 			envMap[wcEnv.Name] = wcEnv
 		}
 
@@ -680,15 +730,15 @@ func (c *Controller) reconcileDeployment(cr *unstructured.Unstructured) error {
 						// 2. User Workload
 						{
 							Name:            "workload",
-							Image:           image,
-							ImagePullPolicy: imagePullPolicy,
-							Command:         workloadCommandSlice,
-							Args:            workloadArgsSlice,
-							Ports:           ports,
+							Image:           workloadConfig.image,
+							ImagePullPolicy: workloadConfig.imagePullPolicy,
+							Command:         workloadConfig.command,
+							Args:            workloadConfig.args,
+							Ports:           workloadConfig.ports,
 							Env:             workloadEnv,
 							VolumeMounts:    volumeMounts,
-							Resources:       resources,
-							SecurityContext: securityContext,
+							Resources:       workloadConfig.resources,
+							SecurityContext: workloadConfig.securityContext,
 						},
 					},
 					NodeSelector: nodeSelector,

@@ -17,29 +17,29 @@ type SSHKey struct {
 
 // User represents a user synced from Keycloak
 type User struct {
-	ID                   string           `gorm:"primaryKey" json:"id"`
-	Username             string           `gorm:"uniqueIndex" json:"username"`
-	Email                string           `json:"email"`
-	FullName             string           `json:"full_name"`
-	DefaultWorkspaceID   sql.NullString   `json:"default_workspace_id,omitempty"`
-	SSHKeys              *json.RawMessage `gorm:"type:jsonb" json:"ssh_keys,omitempty"` // Array of SSHKey objects
-	Workspaces           []Workspace      `gorm:"foreignKey:OwnerID;references:ID" json:"workspaces,omitempty"`
-	Services             []Service        `gorm:"foreignKey:CreatedByID;references:ID" json:"services,omitempty"`
-	CreatedAt            time.Time        `json:"created_at"`
-	UpdatedAt            time.Time        `json:"updated_at"`
+	ID                 string           `gorm:"primaryKey" json:"id"`
+	Username           string           `gorm:"uniqueIndex" json:"username"`
+	Email              string           `json:"email"`
+	FullName           string           `json:"full_name"`
+	DefaultWorkspaceID sql.NullString   `json:"default_workspace_id,omitempty"`
+	SSHKeys            *json.RawMessage `gorm:"type:jsonb" json:"ssh_keys,omitempty"` // Array of SSHKey objects
+	Workspaces         []Workspace      `gorm:"foreignKey:OwnerID;references:ID" json:"workspaces,omitempty"`
+	Services           []Service        `gorm:"foreignKey:CreatedByID;references:ID" json:"services,omitempty"`
+	CreatedAt          time.Time        `json:"created_at"`
+	UpdatedAt          time.Time        `json:"updated_at"`
 }
 
 // Workspace represents a user's workspace containing services
 type Workspace struct {
-	ID          string    `gorm:"primaryKey" json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	OwnerID     string    `gorm:"index" json:"owner_id"`
-	Owner       *User     `gorm:"foreignKey:OwnerID;references:ID" json:"owner,omitempty"`
+	ID           string    `gorm:"primaryKey" json:"id"`
+	Name         string    `json:"name"`
+	Description  string    `json:"description"`
+	OwnerID      string    `gorm:"index" json:"owner_id"`
+	Owner        *User     `gorm:"foreignKey:OwnerID;references:ID" json:"owner,omitempty"`
 	Services     []Service `gorm:"foreignKey:WorkspaceID;references:ID" json:"services,omitempty"`
-	StorageSize  string    `gorm:"default:'50Gi'" json:"storage_size"`          // PVC storage capacity (e.g., "50Gi", "100Gi")
-	StorageClass string    `gorm:"default:'standard'" json:"storage_class"`     // Kubernetes StorageClass for PVC
-	PVCName      string    `json:"pvc_name"`                                    // Name of the associated PVC in Kubernetes
+	StorageSize  string    `gorm:"default:'50Gi'" json:"storage_size"`      // PVC storage capacity (e.g., "50Gi", "100Gi")
+	StorageClass string    `gorm:"default:'standard'" json:"storage_class"` // Kubernetes StorageClass for PVC
+	PVCName      string    `json:"pvc_name"`                                // Name of the associated PVC in Kubernetes
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
@@ -53,44 +53,44 @@ type AgentTemplate struct {
 	DockerImage         string           `json:"docker_image"`
 	DefaultLocalTarget  string           `json:"default_local_target"`
 	DefaultExternalPort int              `json:"default_external_port"`
-	StartupArgs         string           `json:"startup_args"`                    // Startup parameters
-	EnvVars             *json.RawMessage `gorm:"type:jsonb" json:"env_vars"`      // Environment variables
+	StartupArgs         string           `json:"startup_args"`                       // Startup parameters
+	EnvVars             *json.RawMessage `gorm:"type:jsonb" json:"env_vars"`         // Environment variables
 	SecurityContext     *json.RawMessage `gorm:"type:jsonb" json:"security_context"` // Security context (uid, gid)
-	VolumeMounts        *json.RawMessage `gorm:"type:jsonb" json:"volume_mounts"` // Volume mount configuration
+	VolumeMounts        *json.RawMessage `gorm:"type:jsonb" json:"volume_mounts"`    // Volume mount configuration
 	CreatedAt           time.Time        `json:"created_at"`
 	UpdatedAt           time.Time        `json:"updated_at"`
 }
 
 // Service represents a tunnel/proxy service in a workspace
 type Service struct {
-	ID            string         `gorm:"primaryKey" json:"id"`
-	WorkspaceID   string         `gorm:"index" json:"workspace_id"`
-	Workspace     *Workspace     `json:"workspace,omitempty"`
-	Name          string         `json:"name"`
-	LocalTarget   string         `json:"local_target"` // e.g., 127.0.0.1:22
-	ExternalPort  int            `json:"external_port"`
-	AgentID       string         `json:"agent_id"`
-	Status        string         `json:"status"` // running, stopped, error
-	CreatedByID   string         `json:"created_by_id"`
-	CreatedBy     *User          `json:"created_by,omitempty"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
-	LastHeartbeat sql.NullTime   `json:"last_heartbeat,omitempty"`
+	ID            string       `gorm:"primaryKey" json:"id"`
+	WorkspaceID   string       `gorm:"index" json:"workspace_id"`
+	Workspace     *Workspace   `json:"workspace,omitempty"`
+	Name          string       `json:"name"`
+	LocalTarget   string       `json:"local_target"` // e.g., 127.0.0.1:22
+	ExternalPort  int          `json:"external_port"`
+	AgentID       string       `json:"agent_id"`
+	Status        string       `json:"status"` // running, stopped, error
+	CreatedByID   string       `json:"created_by_id"`
+	CreatedBy     *User        `json:"created_by,omitempty"`
+	CreatedAt     time.Time    `json:"created_at"`
+	UpdatedAt     time.Time    `json:"updated_at"`
+	LastHeartbeat sql.NullTime `json:"last_heartbeat,omitempty"`
 	// Template-related fields
-	AgentType   sql.NullString   `gorm:"index" json:"-"`  // ssh, file, coder, jupyter (copied from template at creation)
+	AgentType   sql.NullString   `gorm:"index" json:"-"` // ssh, file, coder, jupyter (copied from template at creation)
 	TemplateID  sql.NullString   `gorm:"index" json:"-"` // Reference to AgentTemplate
 	Template    *AgentTemplate   `gorm:"foreignKey:TemplateID;references:ID" json:"template,omitempty"`
-	StartupArgs sql.NullString   `json:"-"` // User customization of startup args
+	StartupArgs sql.NullString   `json:"-"`                                    // User customization of startup args
 	EnvVars     *json.RawMessage `gorm:"type:jsonb" json:"env_vars,omitempty"` // User customization of env vars
 	// Resource configuration
-	CPUCores         sql.NullString   `gorm:"column:cpu_cores" json:"cpu_cores,omitempty"`           // e.g., "4", "2"
-	MemoryGiB        sql.NullString   `gorm:"column:memory_gib" json:"memory_gib,omitempty"`         // e.g., "16", "8"
-	GPUCount         sql.NullInt64    `gorm:"column:gpu_count" json:"gpu_count,omitempty"`           // Number of GPUs
-	GPUModel         sql.NullString   `gorm:"column:gpu_model" json:"gpu_model,omitempty"`           // e.g., "NVIDIA A100"
-	GPUResourceName  sql.NullString   `gorm:"column:gpu_resource_name" json:"gpu_resource_name,omitempty"`   // e.g., "nvidia.com/gpu"
-	GPUNodeSelector  *json.RawMessage `gorm:"type:jsonb;column:gpu_node_selector" json:"gpu_node_selector,omitempty"` // e.g., {"nvidia.com/model": "A100"}
-	TTL              sql.NullString   `gorm:"column:ttl" json:"ttl,omitempty"` // Idle timeout duration (e.g., "24h", "8h", "30m"). "0" to disable.
-	IsPinned         bool             `gorm:"default:false" json:"is_pinned"`  // Whether to show on workspace card
+	CPUCores        sql.NullString   `gorm:"column:cpu_cores" json:"cpu_cores,omitempty"`                            // e.g., "4", "2"
+	MemoryGiB       sql.NullString   `gorm:"column:memory_gib" json:"memory_gib,omitempty"`                          // e.g., "16", "8"
+	GPUCount        sql.NullInt64    `gorm:"column:gpu_count" json:"gpu_count,omitempty"`                            // Number of GPUs
+	GPUModel        sql.NullString   `gorm:"column:gpu_model" json:"gpu_model,omitempty"`                            // e.g., "NVIDIA A100"
+	GPUResourceName sql.NullString   `gorm:"column:gpu_resource_name" json:"gpu_resource_name,omitempty"`            // e.g., "nvidia.com/gpu"
+	GPUNodeSelector *json.RawMessage `gorm:"type:jsonb;column:gpu_node_selector" json:"gpu_node_selector,omitempty"` // e.g., {"nvidia.com/model": "A100"}
+	TTL             sql.NullString   `gorm:"column:ttl" json:"ttl,omitempty"`                                        // Idle timeout duration (e.g., "24h", "8h", "30m"). "0" to disable.
+	IsPinned        bool             `gorm:"default:false" json:"is_pinned"`                                         // Whether to show on workspace card
 }
 
 // MarshalJSON implements custom JSON serialization for Service
@@ -154,11 +154,11 @@ type AuditLog struct {
 	ID         string    `gorm:"primaryKey" json:"id"`
 	UserID     string    `gorm:"index" json:"user_id"`
 	User       *User     `json:"user,omitempty"`
-	Action     string    `json:"action"`      // create, update, delete
-	Resource   string    `json:"resource"`    // user, workspace, service
+	Action     string    `json:"action"`   // create, update, delete
+	Resource   string    `json:"resource"` // user, workspace, service
 	ResourceID string    `json:"resource_id"`
-	OldData    string    `json:"old_data"`    // JSON
-	NewData    string    `json:"new_data"`    // JSON
+	OldData    string    `json:"old_data"` // JSON
+	NewData    string    `json:"new_data"` // JSON
 	Timestamp  time.Time `json:"timestamp"`
 }
 

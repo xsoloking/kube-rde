@@ -104,7 +104,7 @@ const ServiceDetail: React.FC = () => {
     );
   }
 
-  const isSSH = service.agent_type === 'ssh';
+  const isSSH = service.agent_type?.toLowerCase().trim() === 'ssh';
 
   // Helper to convert public_url to WebSocket URL
   const getWebSocketURL = () => {
