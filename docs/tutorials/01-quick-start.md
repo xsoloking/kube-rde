@@ -40,14 +40,7 @@ Using our one-command installer:
 
 ```bash
 # For local development with kind
-./scripts/quick-start-kind.sh
-```
-
-Or with minikube:
-
-```bash
-# For local development with minikube
-./scripts/quick-start-minikube.sh
+./scripts/quick-start-k3d.sh
 ```
 
 

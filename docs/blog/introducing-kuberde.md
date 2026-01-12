@@ -65,7 +65,7 @@ A CLI tool for:
 ## Key Features
 
 ### 🚀 **One-Click Deployment**
-Deploy to local Kubernetes (kind/minikube) in 5 minutes, or to production (GKE/EKS/AKS) in 30 minutes using our Helm charts and automated scripts.
+Deploy to local Kubernetes (k3d/k3s) in 5 minutes, or to production (GKE/EKS/AKS) in 30 minutes using our Helm charts and automated scripts.
 
 ### 🔒 **Enterprise-Grade Security**
 - OIDC/OAuth2 authentication with Keycloak
@@ -144,19 +144,6 @@ Instructors can:
 - Monitor resource usage
 - Reset environments between classes
 
-### 4. **CI/CD Pipelines**
-Use KubeRDE workspaces in automated pipelines:
-```bash
-# Create temporary workspace
-kuberde-cli workspace create build-env --template ci-builder
-
-# Run tests
-kuberde-cli exec build-env -- make test
-
-# Clean up
-kuberde-cli workspace delete build-env
-```
-
 ## Getting Started in 5 Minutes
 
 ### Local Installation
@@ -167,22 +154,19 @@ git clone https://github.com/xsoloking/kube-rde.git
 cd kube-rde
 
 # Start with kind (Kubernetes in Docker)
-./scripts/quick-start-kind.sh
+./scripts/quick-start-k3d.sh
 
-# Or with Docker Compose
-make dev-up
 ```
 
 **Access the Web UI:**
 ```
-http://kuberde.local (kind/minikube)
-http://localhost:5173 (Docker Compose)
+http://192.168.97.2.nip.io (k3d)
 ```
 
 **Default credentials:**
 ```
 Username: admin
-Password: admin
+Password: password
 ```
 
 ### Create Your First Workspace
@@ -190,29 +174,24 @@ Password: admin
 1. Login to the Web UI
 2. Click "Create Workspace"
 3. Name it "my-dev"
-4. Select "Default" template
+4. Set PVC size
 5. Click "Create"
 
-Wait 1-2 minutes for provisioning, then:
+then:
 - Add SSH service
-- Add Jupyter service
+- Add Jupyter or Coder or File Browser service
 - Access from browser or terminal
 
 ### Connect via SSH
 
-```bash
-# Install CLI
-curl -LO https://github.com/xsoloking/kube-rde/releases/latest/download/kuberde-cli-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)
-chmod +x kuberde-cli-*
-sudo mv kuberde-cli-* /usr/local/bin/kuberde-cli
+Follow the instructions in the Web UI of SSH service to connect via SSH.
+![SSH Service](../media/screenshots/service-detail-ssh.png)
 
-# Configure and login
-kuberde-cli config set server http://kuberde.local
-kuberde-cli login
 
-# Connect to workspace
-kuberde-cli connect my-dev
-```
+### Connect via Jupyter or Coder or File Browser
+
+Navigate to the Workspace Detail page in the Web UI and click the "Open" button in the Access column.
+![Workspace Detail](../media/screenshots/workspace-detail.png)
 
 You're in! Start coding in your remote environment.
 
@@ -220,13 +199,7 @@ You're in! Start coding in your remote environment.
 
 ### Connection Flow
 
-```
-User → CLI/Web → Server → Agent → Service
-                    ↓
-              PostgreSQL
-                    ↓
-               Keycloak
-```
+![Connection Flow](../media/diagrams/kuberde_data_flow.png)
 
 1. **User authenticates** with Keycloak via OIDC
 2. **JWT token** validates identity
@@ -259,23 +232,16 @@ This combination provides:
 
 We're actively developing KubeRDE with exciting features planned:
 
-### Q1 2026
-- [ ] VS Code extension for direct integration
-- [ ] GitHub Actions integration
-- [ ] Enhanced monitoring and metrics
-- [ ] Multi-region support
+### Mutliple Tenants
+- [ ] tenant isolation
+- [ ] tenant management
+- [ ] tenant quota
 
-### Q2 2026
-- [ ] Built-in IDE (web-based VS Code)
-- [ ] Collaborative features (shared workspaces)
-- [ ] Snapshot and restore functionality
-- [ ] Advanced networking (VPC peering)
-
-### Q3 2026
-- [ ] Marketplace for workspace templates
-- [ ] Cost optimization recommendations
-- [ ] Enhanced GPU support
-- [ ] Windows container support
+### Server High Availability
+- [ ] Load balancer
+- [ ] Multiple servers
+- [ ] Failover
+- [ ] Load balancing
 
 See our [full roadmap](../ROADMAP.md) for details.
 

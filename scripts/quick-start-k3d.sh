@@ -81,16 +81,13 @@ check_command k3d || {
     exit 1
 }
 
-# Get host IP (use 127.0.0.1 for k3d as it runs in Docker)
+# Get host IP (use 192.168.97.2 for k3d as it runs in Docker on MacOS)
 HOST_IP="192.168.97.2"
 log_success "Using localhost: ${HOST_IP}"
 
-# Convert IP to nip.io format
-NIP_IO_IP="${HOST_IP//./-}"
-
 # Configure domains with nip.io
-DOMAIN="${NIP_IO_IP}.nip.io"
-KEYCLOAK_DOMAIN="sso.${NIP_IO_IP}.nip.io"
+DOMAIN="${HOST_IP}.nip.io"
+KEYCLOAK_DOMAIN="sso.${HOST_IP}.nip.io"
 PUBLIC_URL="http://${DOMAIN}"
 KEYCLOAK_URL="http://${KEYCLOAK_DOMAIN}"
 
@@ -131,77 +128,65 @@ fi
 # Deploy KubeRDE
 log_step "Deploying KubeRDE to namespace '${NAMESPACE}'..."
 
-# Create namespace
-kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+log_info "Deploying KubeRDE using Helm..."
+helm install kuberde ./charts/kuberde \
+    -f charts/kuberde/values-http.yaml \
+    -n ${NAMESPACE} --create-namespace \
+    --wait \
+    --timeout=10m
+# # else
+#     log_info "Deploying KubeRDE using Kubernetes manifests..."
 
-# Check if we should use Helm or direct YAML
-# if command -v helm &> /dev/null && [ -d "./charts/kuberde" ]; then
-#     log_info "Deploying KubeRDE using Helm..."
-#     helm upgrade --install kuberde ./charts/kuberde \
-#         --namespace ${NAMESPACE} \
-#         --set global.domain=${DOMAIN} \
-#         --set global.publicUrl=${PUBLIC_URL} \
-#         --set server.env.KUBERDE_PUBLIC_URL=${PUBLIC_URL} \
-#         --set server.env.KUBERDE_AGENT_DOMAIN=${DOMAIN} \
-#         --set keycloak.domain=${KEYCLOAK_DOMAIN} \
-#         --set keycloak.url=${KEYCLOAK_URL} \
-#         --set ingress.className=traefik \
-#         --set ingress.tls.enabled=false \
-#         --wait \
-#         --timeout=10m
-# else
-    log_info "Deploying KubeRDE using Kubernetes manifests..."
+#     # Create temporary directory for processed manifests
+#     TEMP_MANIFESTS=$(mktemp -d)
+#     trap "rm -rf ${TEMP_MANIFESTS}" EXIT
 
-    # Create temporary directory for processed manifests
-    TEMP_MANIFESTS=$(mktemp -d)
-    trap "rm -rf ${TEMP_MANIFESTS}" EXIT
+#     log_info "Processing manifests with nip.io configuration..."
 
-    log_info "Processing manifests with nip.io configuration..."
+#     # Export variables for envsubst
+#     export KUBERDE_DOMAIN=${DOMAIN}
+#     export KUBERDE_PUBLIC_URL=${PUBLIC_URL}
+#     export KUBERDE_AGENT_DOMAIN=${DOMAIN}
+#     export KEYCLOAK_DOMAIN=${KEYCLOAK_DOMAIN}
+#     export KEYCLOAK_URL=${KEYCLOAK_URL}
+#     export POSTGRES_PASSWORD=kuberde
+#     export DB_USER=kuberde
+#     export DB_PASSWORD=kuberde
 
-    # Export variables for envsubst
-    export KUBERDE_DOMAIN=${DOMAIN}
-    export KUBERDE_PUBLIC_URL=${PUBLIC_URL}
-    export KUBERDE_AGENT_DOMAIN=${DOMAIN}
-    export KEYCLOAK_DOMAIN=${KEYCLOAK_DOMAIN}
-    export KEYCLOAK_URL=${KEYCLOAK_URL}
-    export POSTGRES_PASSWORD=kuberde
-    export DB_USER=kuberde
-    export DB_PASSWORD=kuberde
+#     # Apply base resources (namespace, CRD, PostgreSQL)
+#     kubectl apply -f deploy/k8s/00-namespace.yaml
+#     kubectl apply -f deploy/k8s/01-crd.yaml
+#     envsubst < deploy/k8s/06-postgresql.yaml > ${TEMP_MANIFESTS}/postgresql.yaml
+#     kubectl apply -f ${TEMP_MANIFESTS}/postgresql.yaml -n ${NAMESPACE}
 
-    # Apply base resources (namespace, CRD, PostgreSQL)
-    kubectl apply -f deploy/k8s/00-namespace.yaml
-    kubectl apply -f deploy/k8s/01-crd.yaml
-    envsubst < deploy/k8s/06-postgresql.yaml > ${TEMP_MANIFESTS}/postgresql.yaml
-    kubectl apply -f ${TEMP_MANIFESTS}/postgresql.yaml -n ${NAMESPACE}
+#     # Process and apply secrets
+#     for secret_file in deploy/k8s/02-*-secret.yaml; do
+#         if [[ -f "$secret_file" ]]; then
+#             envsubst < "$secret_file" > ${TEMP_MANIFESTS}/$(basename "$secret_file")    
+#             kubectl apply -f ${TEMP_MANIFESTS}/$(basename "$secret_file") -n ${NAMESPACE}
+#         fi
+# #     done
 
-    # Process and apply secrets
-    for secret_file in deploy/k8s/02-*-secret.yaml; do
-        if [[ -f "$secret_file" ]]; then
-            envsubst < "$secret_file" > ${TEMP_MANIFESTS}/$(basename "$secret_file")    
-            kubectl apply -f ${TEMP_MANIFESTS}/$(basename "$secret_file") -n ${NAMESPACE}
-        fi
-    done
+#     # Process k3s-specific configurations
+#     # Substitute environment variables in YAML files
+#     log_info "Configuring Keycloak for ${KEYCLOAK_DOMAIN}..."
+#     envsubst < deploy/k8s/02-keycloak-k3s.yaml > ${TEMP_MANIFESTS}/keycloak.yaml
+#     kubectl apply -f ${TEMP_MANIFESTS}/keycloak.yaml -n ${NAMESPACE}
 
-    # Process k3s-specific configurations
-    # Substitute environment variables in YAML files
-    log_info "Configuring Keycloak for ${KEYCLOAK_DOMAIN}..."
-    envsubst < deploy/k8s/02-keycloak-k3s.yaml > ${TEMP_MANIFESTS}/keycloak.yaml
-    kubectl apply -f ${TEMP_MANIFESTS}/keycloak.yaml -n ${NAMESPACE}
+#     log_info "Configuring Server for ${DOMAIN}..."
+#     envsubst < deploy/k8s/03-server-k3s.yaml > ${TEMP_MANIFESTS}/server.yaml
+#     kubectl apply -f ${TEMP_MANIFESTS}/server.yaml -n ${NAMESPACE}
 
-    log_info "Configuring Server for ${DOMAIN}..."
-    envsubst < deploy/k8s/03-server-k3s.yaml > ${TEMP_MANIFESTS}/server.yaml
-    kubectl apply -f ${TEMP_MANIFESTS}/server.yaml -n ${NAMESPACE}
+#     # Apply other components
+#     kubectl apply -f deploy/k8s/02-web.yaml -n ${NAMESPACE}
+#     kubectl apply -f deploy/k8s/04-operator.yaml -n ${NAMESPACE}
 
-    # Apply other components
-    kubectl apply -f deploy/k8s/02-web.yaml -n ${NAMESPACE}
-    kubectl apply -f deploy/k8s/04-operator.yaml -n ${NAMESPACE}
+#     # Process and apply ingress with environment variables
+#     log_info "Configuring Traefik Ingress for nip.io domains..."
+#     envsubst < deploy/k8s/05-ingress-k3s.yaml > ${TEMP_MANIFESTS}/ingress.yaml
+#     kubectl apply -f ${TEMP_MANIFESTS}/ingress.yaml -n ${NAMESPACE}
 
-    # Process and apply ingress with environment variables
-    log_info "Configuring Traefik Ingress for nip.io domains..."
-    envsubst < deploy/k8s/05-ingress-k3s.yaml > ${TEMP_MANIFESTS}/ingress.yaml
-    kubectl apply -f ${TEMP_MANIFESTS}/ingress.yaml -n ${NAMESPACE}
-
-    log_success "Manifests applied successfully"
+#     log_success "Manifests applied successfully"
 # fi
 
 log_info "Waiting for KubeRDE pods to be ready..."
@@ -224,7 +209,7 @@ log_success "Workers: ${WORKERS}"
 echo ""
 log_info "Access KubeRDE at:"
 echo "  📱 Web UI:        ${PUBLIC_URL}"
-echo "  🔐 Keycloak:      ${KEYCLOAK_URL}/auth/admin"
+echo "  🔐 Keycloak:      ${KEYCLOAK_URL}"
 echo ""
 log_info "Agent URLs (examples):"
 echo "  🤖 user-alice-dev:   http://user-alice-dev.${DOMAIN}"
@@ -232,7 +217,7 @@ echo "  🤖 user-bob-jupyter: http://user-bob-jupyter.${DOMAIN}"
 echo ""
 log_info "Default credentials:"
 echo "  👤 Username: admin"
-echo "  🔑 Password: admin"
+echo "  🔑 Password: password"
 echo ""
 log_warn "IMPORTANT: Change the default password immediately!"
 echo ""
@@ -249,9 +234,9 @@ log_info "DNS Details (nip.io):"
 echo "  ✓ No local DNS configuration needed!"
 echo "  ✓ Wildcard domains automatically work"
 echo "  ✓ All traffic routes through localhost"
-echo "  ✓ Main:     ${DOMAIN} → 127.0.0.1"
-echo "  ✓ Keycloak: ${KEYCLOAK_DOMAIN} → 127.0.0.1"
-echo "  ✓ Agents:   *.${DOMAIN} → 127.0.0.1"
+echo "  ✓ Main:     ${DOMAIN} → 192.168.97.2"
+echo "  ✓ Keycloak: ${KEYCLOAK_DOMAIN} → 192.168.97.2"
+echo "  ✓ Agents:   *.${DOMAIN} → 192.168.97.2"
 echo ""
 log_info "Why k3d?"
 echo "  🐳 Runs k3s in Docker (easy to manage)"
@@ -266,7 +251,7 @@ echo ""
 # Test DNS resolution
 log_step "Testing nip.io DNS resolution..."
 if ping -c 1 -W 2 ${DOMAIN} &> /dev/null; then
-    log_success "DNS resolution working: ${DOMAIN} → 127.0.0.1"
+    log_success "DNS resolution working: ${DOMAIN} → 192.168.97.2"
 else
     log_warn "DNS resolution test failed - check internet connection"
     log_info "nip.io requires internet connectivity"
