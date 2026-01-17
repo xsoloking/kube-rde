@@ -30,7 +30,7 @@ const Login: React.FC = () => {
         {/* Logo and Title */}
         <div className="text-center mb-8">
           <div className="flex items-center justify-center mb-6">
-            <img src="/icon.png" alt="KubeRDE" className="size-28 rounded-2xl shadow-xl shadow-primary/20" />
+            <img src="/logo.png" alt="KubeRDE" className="size-24 rounded-2xl shadow-xl shadow-primary/20" />
           </div>
           <h1 className="text-4xl font-bold text-white mb-2">KubeRDE</h1>
           <p className="text-text-secondary text-lg">Remote Development Environment</p>
