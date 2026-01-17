@@ -265,7 +265,6 @@ type workloadContainerConfig struct {
 	env             []corev1.EnvVar
 	resources       corev1.ResourceRequirements
 	securityContext *corev1.SecurityContext
-	volumeMounts    []corev1.VolumeMount
 }
 
 // parseWorkloadContainer extracts and validates workload container configuration

@@ -4232,50 +4232,6 @@ func handleListWorkspaceServices(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /api/workspaces/:id/services - Create a service in a workspace
-// extractServiceID gets service ID from query or path
-func extractServiceID(r *http.Request) (string, error) {
-	serviceID := r.URL.Query().Get("id")
-	if serviceID == "" {
-		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/services/"), "/")
-		if len(parts) > 0 && parts[0] != "" {
-			serviceID = parts[0]
-		}
-	}
-	if serviceID == "" {
-		return "", fmt.Errorf("service ID is required")
-	}
-	return serviceID, nil
-}
-
-// extractAgentID gets agent ID from path
-func extractAgentID(r *http.Request) (string, error) {
-	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/agents/"), "/")
-	if len(parts) == 0 || parts[0] == "" {
-		return "", fmt.Errorf("agent ID is required")
-	}
-	return parts[0], nil
-}
-
-// validateMethodAndAuth checks HTTP method and returns authenticated user ID
-func validateMethodAndAuth(w http.ResponseWriter, r *http.Request, method string) (string, bool) {
-	if r.Method != method {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return "", false
-	}
-
-	userID, err := extractUserIDFromRequest(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return "", false
-	}
-
-	if db == nil {
-		http.Error(w, "Database not available", http.StatusServiceUnavailable)
-		return "", false
-	}
-
-	return userID, true
-}
 
 // ensureUserExistsInDB verifies user exists and creates if needed from token
 func ensureUserExistsInDB(userID string, r *http.Request) error {
