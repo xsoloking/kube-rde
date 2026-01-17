@@ -19,14 +19,10 @@ linters:
     errcheck:
       check-type-assertions: true
       check-blank: true
-    govet:
-      shadow:
-        strict: true
     revive:
       confidence: 0.8
 
 issues:
-  exclude-use-default: false
   max-issues-per-linter: 0
   max-same-issues: 0
 
