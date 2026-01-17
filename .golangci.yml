@@ -1,44 +1,39 @@
-# golangci-lint 配置文件
+# golangci-lint 配置文件 (v2 format)
+version: "2"
 
 run:
   timeout: 5m
   tests: true
-  skip-dirs:
-    - vendor
-    - node_modules
-    - bin
-    - dist
 
 linters:
   enable:
     - errcheck
-    - gosimple
     - govet
     - ineffassign
     - staticcheck
-    - typecheck
     - unused
-    - gofmt
-    - goimports
     - misspell
     - gocritic
     - revive
-
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-    check-blank: true
-  
-  govet:
-    check-shadowing: true
-  
-  gofmt:
-    simplify: true
-  
-  revive:
-    confidence: 0.8
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    govet:
+      shadow:
+        strict: true
+    revive:
+      confidence: 0.8
 
 issues:
   exclude-use-default: false
   max-issues-per-linter: 0
   max-same-issues: 0
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    gofmt:
+      simplify: true
