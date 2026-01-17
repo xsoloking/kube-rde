@@ -1400,14 +1400,15 @@ func (c *Controller) reconcileStorage(cr *unstructured.Unstructured, agentID str
 		}
 
 		existing, err := pvcsClient.Get(context.TODO(), pvcName, metav1.GetOptions{})
-		if errors.IsNotFound(err) {
+		switch {
+		case errors.IsNotFound(err):
 			log.Printf("Creating PVC %s for agent %s", pvcName, agentID)
 			_, err = pvcsClient.Create(context.TODO(), pvc, metav1.CreateOptions{})
 			if err != nil {
 				log.Printf("Error creating PVC %s: %v", pvcName, err)
 				return err
 			}
-		} else if err == nil {
+		case err == nil:
 			// PVC exists - only update mutable fields (storage size)
 			// Note: Most PVC fields are immutable after creation, so we must be careful
 			log.Printf("PVC %s already exists for agent %s", pvcName, agentID)
@@ -1427,7 +1428,7 @@ func (c *Controller) reconcileStorage(cr *unstructured.Unstructured, agentID str
 			} else {
 				log.Printf("PVC %s size unchanged, no update needed", pvcName)
 			}
-		} else if !errors.IsNotFound(err) {
+		default:
 			log.Printf("Error getting PVC %s: %v", pvcName, err)
 			return err
 		}

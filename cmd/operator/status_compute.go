@@ -152,13 +152,14 @@ func (c *Controller) computeStatus(ctx context.Context, cr *unstructured.Unstruc
 				}
 			}
 
-			if errorMessage != "" {
+			switch {
+			case errorMessage != "":
 				result.Phase = "Error"
 				result.Message = errorMessage
-			} else if isStarting {
+			case isStarting:
 				result.Phase = "Starting"
 				result.Message = "Pod is starting (creating containers)"
-			} else {
+			default:
 				result.Phase = "Pending"
 				result.Message = "Pod is pending"
 			}

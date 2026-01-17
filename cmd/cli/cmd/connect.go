@@ -69,12 +69,12 @@ func runConnect(url string) {
 	ws, resp, err := dialer.Dial(url, header)
 	if err != nil {
 		if resp != nil {
-			body, _ := io.ReadAll(resp.Body)
+			body, _ := io.ReadAll(resp.Body) //nolint:errcheck // error handling not needed in fatal path
 			log.Fatalf("Dial failed: %v (Status: %s, Body: %s)", err, resp.Status, string(body))
 		}
 		log.Fatalf("Dial failed: %v", err)
 	}
-	defer func() { _ = ws.Close() }()
+	defer func() { _ = ws.Close() }() //nolint:errcheck // cleanup error not critical
 
 	// 处理中断信号，优雅关闭
 	c := make(chan os.Signal, 1)
@@ -141,7 +141,7 @@ func loadToken() (*oauth2.Token, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = file.Close() }()
+	defer func() { _ = file.Close() }() //nolint:errcheck // cleanup error not critical
 
 	var token oauth2.Token
 	if err := json.NewDecoder(file).Decode(&token); err != nil {

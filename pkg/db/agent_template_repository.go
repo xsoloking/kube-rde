@@ -2,8 +2,9 @@ package db
 
 import (
 	"context"
-	"gorm.io/gorm"
 	"kuberde/pkg/models"
+
+	"gorm.io/gorm"
 )
 
 // AgentTemplateRepository handles database operations for agent templates

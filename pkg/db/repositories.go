@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"time"
 
+	"kuberde/pkg/models"
+
 	"github.com/google/uuid"
 	"gorm.io/gorm"
-	"kuberde/pkg/models"
 )
 
 // UserRepository handles User operations

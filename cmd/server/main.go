@@ -342,13 +342,14 @@ func (t *K8sInternalTransport) RoundTrip(req *http.Request) (*http.Response, err
 		// Replace Host with internal service
 		// Parse internal URL to get scheme and host
 		// Assuming InternalURL is simpler like "http://keycloak:8080"
-		if strings.HasPrefix(t.InternalURL, "http://") {
+		switch {
+		case strings.HasPrefix(t.InternalURL, "http://"):
 			req.URL.Scheme = "http"
 			req.URL.Host = strings.TrimPrefix(t.InternalURL, "http://")
-		} else if strings.HasPrefix(t.InternalURL, "https://") {
+		case strings.HasPrefix(t.InternalURL, "https://"):
 			req.URL.Scheme = "https"
 			req.URL.Host = strings.TrimPrefix(t.InternalURL, "https://")
-		} else {
+		default:
 			// Fallback
 			req.URL.Scheme = "http"
 			req.URL.Host = t.InternalURL
@@ -6530,14 +6531,9 @@ func updateRDEAgentSpec(ctx context.Context, service *models.Service) error {
 		} else {
 			delete(spec, "nodeSelector")
 		}
-	} else {
-		// If explicitly nil in DB, remove it? Or keep?
-		// Service model has *json.RawMessage. If it's nil, it means "no change" or "unset"?
-		// Logic: If GPU is disabled (GPUCount=0), we should remove nodeSelector.
-		// If GPUCount=0, the Create logic wouldn't set nodeSelector.
-		if service.GPUCount.Valid && service.GPUCount.Int64 == 0 {
-			delete(spec, "nodeSelector")
-		}
+	} else if service.GPUCount.Valid && service.GPUCount.Int64 == 0 {
+		// If GPUNodeSelector is nil and GPU is disabled (GPUCount=0), remove nodeSelector
+		delete(spec, "nodeSelector")
 	}
 
 	// Apply updates

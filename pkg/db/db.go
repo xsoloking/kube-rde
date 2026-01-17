@@ -6,10 +6,11 @@ import (
 	"os"
 	"path/filepath"
 
+	"kuberde/pkg/models"
+
 	"github.com/pressly/goose/v3"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	"kuberde/pkg/models"
 )
 
 var DB *gorm.DB

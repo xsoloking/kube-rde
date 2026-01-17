@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"os"
 )
 
 func main() {
@@ -20,11 +19,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer func() { _ = conn.Close() }()
-
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
 		fmt.Printf("🎉 MOCK RECEIVED: %s\n", scanner.Text())
 	}
-	os.Exit(0)
+	_ = conn.Close() //nolint:errcheck // cleanup error not critical
 }

@@ -51,7 +51,11 @@ func runLogin(cmd *cobra.Command, args []string) {
 	if err != nil {
 		log.Fatalf("Failed to start local server: %v", err)
 	}
-	port := listener.Addr().(*net.TCPAddr).Port
+	tcpAddr, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		log.Fatalf("Failed to get TCP address from listener")
+	}
+	port := tcpAddr.Port
 	callbackPath := "/callback"
 	redirectURL := fmt.Sprintf("http://127.0.0.1:%d%s", port, callbackPath)
 
@@ -110,7 +114,7 @@ func runLogin(cmd *cobra.Command, args []string) {
 
 	// Shutdown server
 	if err := server.Shutdown(ctx); err != nil {
-		log.Printf("Failed to gracefuly shutdown server: %v", err)
+		log.Printf("Failed to gracefully shutdown server: %v", err)
 	}
 
 	// 6. Exchange Code for Token
