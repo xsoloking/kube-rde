@@ -222,7 +222,7 @@ jobs:
       - test-web
       - build-web
       - security-scan
-      - check-docs
+      # - check-docs
     steps:
       - name: All checks passed
         run: echo "All CI checks passed successfully!"

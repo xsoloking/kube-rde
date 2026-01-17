@@ -45,4 +45,4 @@ build/
 .env.byai
 values-byai.yaml
 
-.git_bak
+.claude
