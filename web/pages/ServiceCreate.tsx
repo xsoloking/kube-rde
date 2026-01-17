@@ -457,26 +457,28 @@ const ServiceCreate: React.FC = () => {
             )}
 
           {/* SSH Key Success Message */}
-          {selectedTemplate.agent_type?.toLowerCase().trim() === 'ssh' && user?.ssh_keys && user.ssh_keys.length > 0 && (
-            <section className="bg-emerald-500/10 rounded-2xl border border-emerald-500/30 p-5 shadow-xl animate-fade-in">
-              <div className="flex items-center gap-3">
-                <div className="size-8 rounded-lg bg-emerald-500/20 flex items-center justify-center">
-                  <span className="material-symbols-outlined text-[20px] text-emerald-500">
-                    check_circle
-                  </span>
+          {selectedTemplate.agent_type?.toLowerCase().trim() === 'ssh' &&
+            user?.ssh_keys &&
+            user.ssh_keys.length > 0 && (
+              <section className="bg-emerald-500/10 rounded-2xl border border-emerald-500/30 p-5 shadow-xl animate-fade-in">
+                <div className="flex items-center gap-3">
+                  <div className="size-8 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+                    <span className="material-symbols-outlined text-[20px] text-emerald-500">
+                      check_circle
+                    </span>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-emerald-500">
+                      SSH Key Configured ({user.ssh_keys.length} key
+                      {user.ssh_keys.length > 1 ? 's' : ''})
+                    </p>
+                    <p className="text-xs text-emerald-500/70 mt-0.5">
+                      You're ready to connect to SSH services
+                    </p>
+                  </div>
                 </div>
-                <div className="flex-1">
-                  <p className="text-sm font-semibold text-emerald-500">
-                    SSH Key Configured ({user.ssh_keys.length} key
-                    {user.ssh_keys.length > 1 ? 's' : ''})
-                  </p>
-                  <p className="text-xs text-emerald-500/70 mt-0.5">
-                    You're ready to connect to SSH services
-                  </p>
-                </div>
-              </div>
-            </section>
-          )}
+              </section>
+            )}
 
           {/* Resource Configuration Section */}
           <section className="bg-surface-dark rounded-2xl border border-border-dark p-8 shadow-xl">

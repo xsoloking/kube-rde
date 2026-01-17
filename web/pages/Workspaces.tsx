@@ -233,7 +233,11 @@ const Workspaces: React.FC = () => {
                           key={svc.id}
                           onClick={(e) => handleServiceClick(e, svc)}
                           className="flex items-center gap-2 px-3 py-2 rounded-lg bg-background-dark/50 border border-border-dark hover:border-primary/50 hover:bg-background-dark transition-all group/svc"
-                          title={svc.agent_type?.toLowerCase().trim() === 'ssh' ? 'View Details' : 'Open Web Access'}
+                          title={
+                            svc.agent_type?.toLowerCase().trim() === 'ssh'
+                              ? 'View Details'
+                              : 'Open Web Access'
+                          }
                         >
                           <span
                             className={`material-symbols-outlined text-[18px] ${getServiceColor(svc.agent_type)}`}
@@ -244,7 +248,9 @@ const Workspaces: React.FC = () => {
                             {svc.name}
                           </span>
                           <span className="material-symbols-outlined text-[14px] text-text-secondary opacity-0 group-hover/svc:opacity-100 -ml-1 transition-all">
-                            {svc.agent_type?.toLowerCase().trim() === 'ssh' ? 'chevron_right' : 'open_in_new'}
+                            {svc.agent_type?.toLowerCase().trim() === 'ssh'
+                              ? 'chevron_right'
+                              : 'open_in_new'}
                           </span>
                         </button>
                       ))}
