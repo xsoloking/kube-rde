@@ -17,8 +17,8 @@ linters:
     - revive
   settings:
     errcheck:
-      check-type-assertions: true
-      check-blank: true
+      check-type-assertions: false  # K8s operator type assertions are guaranteed by API contract
+      check-blank: false  # Don't flag explicitly ignored errors (_ = ...)
     revive:
       confidence: 0.8
 

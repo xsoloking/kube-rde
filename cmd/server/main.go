@@ -925,13 +925,14 @@ func handleSubdomainProxy(w http.ResponseWriter, r *http.Request) {
 		targetOwner := "unknown"
 
 		// Extract owner from agent ID
-		if strings.HasPrefix(agentID, "kuberde-agent-") {
+		switch {
+		case strings.HasPrefix(agentID, "kuberde-agent-"):
 			agentIDTrimmed := strings.TrimPrefix(agentID, "kuberde-agent-")
 			parts := strings.SplitN(agentIDTrimmed, "-", 4)
 			if len(parts) >= 1 {
 				targetOwner = parts[0] // userName is the first part
 			}
-		} else if strings.HasPrefix(agentID, "kuberde-") {
+		case strings.HasPrefix(agentID, "kuberde-"):
 			agentIDTrimmed := strings.TrimPrefix(agentID, "kuberde-")
 			parts := strings.SplitN(agentIDTrimmed, "-", 3)
 			if len(parts) >= 3 && db != nil {
@@ -941,7 +942,7 @@ func handleSubdomainProxy(w http.ResponseWriter, r *http.Request) {
 					targetOwner = workspace.Owner.Username
 				}
 			}
-		} else if strings.HasPrefix(agentID, "user-") {
+		case strings.HasPrefix(agentID, "user-"):
 			idParts := strings.SplitN(agentID, "-", 3)
 			if len(idParts) >= 2 {
 				targetOwner = idParts[1]
@@ -1182,13 +1183,14 @@ func handleUserConnect(w http.ResponseWriter, r *http.Request) {
 		targetOwner := "unknown"
 
 		// Extract owner from agent ID
-		if strings.HasPrefix(agentID, "kuberde-agent-") {
+		switch {
+		case strings.HasPrefix(agentID, "kuberde-agent-"):
 			agentIDTrimmed := strings.TrimPrefix(agentID, "kuberde-agent-")
 			parts := strings.SplitN(agentIDTrimmed, "-", 4)
 			if len(parts) >= 1 {
 				targetOwner = parts[0] // userName is the first part
 			}
-		} else if strings.HasPrefix(agentID, "kuberde-") {
+		case strings.HasPrefix(agentID, "kuberde-"):
 			agentIDTrimmed := strings.TrimPrefix(agentID, "kuberde-")
 			parts := strings.SplitN(agentIDTrimmed, "-", 3)
 			if len(parts) >= 3 && db != nil {
@@ -1198,7 +1200,7 @@ func handleUserConnect(w http.ResponseWriter, r *http.Request) {
 					targetOwner = workspace.Owner.Username
 				}
 			}
-		} else if strings.HasPrefix(agentID, "user-") {
+		case strings.HasPrefix(agentID, "user-"):
 			idParts := strings.SplitN(agentID, "-", 3)
 			if len(idParts) >= 2 {
 				targetOwner = idParts[1]
