@@ -34,7 +34,7 @@ const Sidebar: React.FC = () => {
   return (
     <aside className="w-64 h-full hidden lg:flex flex-col border-r border-border-dark bg-[#0f1824] shrink-0">
       <div className="p-6 flex items-center gap-3">
-        <img src="/logo.png" alt="KubeRDE" className="size-10 rounded-lg shadow-lg shadow-primary/20" />
+        <img src="/icon.png" alt="KubeRDE" className="size-12 rounded-xl" />
         <div className="flex flex-col">
           <h1 className="text-white text-lg font-bold leading-none tracking-tight">KubeRDE</h1>
           <p className="text-text-secondary text-[10px] font-normal uppercase tracking-widest mt-1">

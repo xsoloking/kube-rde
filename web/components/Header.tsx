@@ -17,7 +17,7 @@ const Header: React.FC = () => {
     <header className="sticky top-0 z-50 w-full border-b border-border-dark bg-background-dark/80 backdrop-blur-md h-16 shrink-0">
       <div className="px-6 h-full flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <img src="/logo.png" alt="KubeRDE" className="lg:hidden size-8 rounded" />
+          <img src="/icon.png" alt="KubeRDE" className="lg:hidden size-8 rounded-lg" />
           <nav className="hidden sm:flex items-center gap-2 text-sm">
             <span className="text-text-secondary">Platform</span>
             {pathParts.map((part, i) => {
