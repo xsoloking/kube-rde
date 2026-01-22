@@ -70,6 +70,8 @@ var (
 	// Repository instances
 	resourceConfigRepo repositories.ResourceConfigRepository
 	userQuotaRepo      repositories.UserQuotaRepository
+	teamRepo           repositories.TeamRepository
+	teamQuotaRepo      repositories.TeamQuotaRepository
 
 	// Domain configuration
 	frpURL      = "https://frp.byai.uk" // Default service URL
@@ -6880,6 +6882,8 @@ func initDatabase() error {
 			db = dbpkg.DB
 			resourceConfigRepo = repositories.NewResourceConfigRepository(db)
 			userQuotaRepo = repositories.NewUserQuotaRepository(db)
+			teamRepo = repositories.NewTeamRepository(db)
+			teamQuotaRepo = repositories.NewTeamQuotaRepository(db)
 			log.Println("✓ Repository instances initialized")
 			return nil
 		}
@@ -7013,6 +7017,10 @@ func routeMainDomain(w http.ResponseWriter, r *http.Request) {
 		requireRole("admin")(handleGetAdminStats)(w, r)
 	case strings.HasPrefix(r.URL.Path, "/api/admin/audit-logs"):
 		requireRole("admin")(handleListAuditLogs)(w, r)
+	case r.URL.Path == "/api/admin/teams":
+		requireRole("admin")(handleTeams)(w, r)
+	case strings.HasPrefix(r.URL.Path, "/api/admin/teams/"):
+		requireRole("admin")(handleTeamByID)(w, r)
 	case strings.HasPrefix(r.URL.Path, "/download/cli/"):
 		handleDownloadCLI(w, r)
 	default:
@@ -7085,6 +7093,104 @@ func routeAdminResourceConfig(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// handleTeams routes team list and create requests
+func handleTeams(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		handleListTeams(w, r)
+	case http.MethodPost:
+		handleCreateTeam(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleTeamByID routes team-specific requests (get, update, delete)
+func handleTeamByID(w http.ResponseWriter, r *http.Request) {
+	// For now, just handle the routing stub
+	// Individual team operations will be implemented in subsequent tasks
+	http.Error(w, "Not implemented", http.StatusNotImplemented)
+}
+
+// handleListTeams returns all teams
+func handleListTeams(w http.ResponseWriter, r *http.Request) {
+	teams, err := teamRepo.List()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to list teams: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"teams": teams,
+	})
+}
+
+// handleCreateTeam creates a new team
+func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name        string `json:"name"`
+		DisplayName string `json:"display_name"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Name == "" {
+		http.Error(w, "Name is required", http.StatusBadRequest)
+		return
+	}
+
+	// Generate namespace name
+	namespace := fmt.Sprintf("kuberde-%s", req.Name)
+
+	team := &models.Team{
+		Name:        req.Name,
+		DisplayName: req.DisplayName,
+		Namespace:   namespace,
+		Status:      "active",
+	}
+
+	if err := teamRepo.Create(team); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create team: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Create Kubernetes namespace
+	if err := createTeamNamespace(team); err != nil {
+		log.Printf("Warning: Failed to create namespace for team %s: %v", team.Name, err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(team)
+}
+
+// createTeamNamespace creates a Kubernetes namespace for a team
+func createTeamNamespace(team *models.Team) error {
+	if k8sClientset == nil {
+		return fmt.Errorf("kubernetes client not initialized")
+	}
+
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: team.Namespace,
+			Labels: map[string]string{
+				"kuberde.io/team":      team.Name,
+				"kuberde.io/component": "team-namespace",
+			},
+		},
+	}
+
+	_, err := k8sClientset.CoreV1().Namespaces().Create(context.Background(), ns, metav1.CreateOptions{})
+	if err != nil && !strings.Contains(err.Error(), "already exists") {
+		return err
+	}
+	return nil
 }
 
 func main() {
