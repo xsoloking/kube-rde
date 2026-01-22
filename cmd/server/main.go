@@ -7237,9 +7237,171 @@ func handleTeamMembers(w http.ResponseWriter, r *http.Request, teamID uint) {
 	})
 }
 
-// Placeholder for Task 7
 func handleTeamQuota(w http.ResponseWriter, r *http.Request, teamID uint) {
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	switch r.Method {
+	case http.MethodGet:
+		handleGetTeamQuota(w, r, teamID)
+	case http.MethodPut:
+		handleUpdateTeamQuota(w, r, teamID)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func handleGetTeamQuota(w http.ResponseWriter, r *http.Request, teamID uint) {
+	team, err := teamRepo.GetByID(teamID)
+	if err != nil {
+		http.Error(w, "Team not found", http.StatusNotFound)
+		return
+	}
+
+	resourceConfig, err := resourceConfigRepo.GetConfig()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get resource config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	existingQuotas, err := teamQuotaRepo.GetByTeamID(teamID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get team quotas: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	quotaMap := make(map[int]int)
+	for _, q := range existingQuotas {
+		quotaMap[q.ResourceConfigID] = q.Quota
+	}
+
+	var gpuTypes []struct {
+		ModelName      string `json:"model_name"`
+		ResourceName   string `json:"resource_name"`
+		NodeLabelKey   string `json:"node_label_key"`
+		NodeLabelValue string `json:"node_label_value"`
+		Limit          int    `json:"limit"`
+	}
+	json.Unmarshal([]byte(resourceConfig.GPUTypes), &gpuTypes)
+
+	type QuotaItem struct {
+		ResourceConfigID int    `json:"resource_config_id"`
+		ResourceType     string `json:"resource_type"`
+		ResourceName     string `json:"resource_name"`
+		DisplayName      string `json:"display_name"`
+		Quota            int    `json:"quota"`
+		Unit             string `json:"unit"`
+	}
+
+	quotaItems := []QuotaItem{
+		{ResourceConfigID: 1, ResourceType: "cpu", ResourceName: "cpu", DisplayName: "CPU Cores", Quota: quotaMap[1], Unit: "cores"},
+		{ResourceConfigID: 2, ResourceType: "memory", ResourceName: "memory", DisplayName: "Memory", Quota: quotaMap[2], Unit: "Gi"},
+		{ResourceConfigID: 3, ResourceType: "storage", ResourceName: "storage", DisplayName: "Storage", Quota: quotaMap[3], Unit: "Gi"},
+	}
+
+	for i, gpu := range gpuTypes {
+		quotaItems = append(quotaItems, QuotaItem{
+			ResourceConfigID: 100 + i,
+			ResourceType:     "gpu",
+			ResourceName:     gpu.ResourceName,
+			DisplayName:      gpu.ModelName,
+			Quota:            quotaMap[100+i],
+			Unit:             "units",
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"team":   team,
+		"quotas": quotaItems,
+	})
+}
+
+func handleUpdateTeamQuota(w http.ResponseWriter, r *http.Request, teamID uint) {
+	team, err := teamRepo.GetByID(teamID)
+	if err != nil {
+		http.Error(w, "Team not found", http.StatusNotFound)
+		return
+	}
+
+	var req struct {
+		Quotas []struct {
+			ResourceConfigID int `json:"resource_config_id"`
+			Quota            int `json:"quota"`
+		} `json:"quotas"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	quotas := make([]models.TeamQuota, len(req.Quotas))
+	for i, q := range req.Quotas {
+		quotas[i] = models.TeamQuota{
+			TeamID:           teamID,
+			ResourceConfigID: q.ResourceConfigID,
+			Quota:            q.Quota,
+		}
+	}
+
+	if err := teamQuotaRepo.UpsertBatch(teamID, quotas); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to update team quotas: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := applyTeamResourceQuota(team, req.Quotas); err != nil {
+		log.Printf("Warning: Failed to apply ResourceQuota for team %s: %v", team.Name, err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "Team quotas updated successfully",
+	})
+}
+
+func applyTeamResourceQuota(team *models.Team, quotas []struct {
+	ResourceConfigID int `json:"resource_config_id"`
+	Quota            int `json:"quota"`
+}) error {
+	if k8sClientset == nil {
+		return fmt.Errorf("kubernetes client not initialized")
+	}
+
+	hard := corev1.ResourceList{}
+
+	for _, q := range quotas {
+		if q.Quota <= 0 {
+			continue
+		}
+		switch q.ResourceConfigID {
+		case 1: // CPU
+			hard[corev1.ResourceRequestsCPU] = resource.MustParse(fmt.Sprintf("%d", q.Quota))
+			hard[corev1.ResourceLimitsCPU] = resource.MustParse(fmt.Sprintf("%d", q.Quota))
+		case 2: // Memory
+			hard[corev1.ResourceRequestsMemory] = resource.MustParse(fmt.Sprintf("%dGi", q.Quota))
+			hard[corev1.ResourceLimitsMemory] = resource.MustParse(fmt.Sprintf("%dGi", q.Quota))
+		case 3: // Storage
+			hard[corev1.ResourceRequestsStorage] = resource.MustParse(fmt.Sprintf("%dGi", q.Quota))
+		}
+	}
+
+	if len(hard) == 0 {
+		return nil
+	}
+
+	rq := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "team-quota",
+			Namespace: team.Namespace,
+		},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: hard,
+		},
+	}
+
+	_, err := k8sClientset.CoreV1().ResourceQuotas(team.Namespace).Create(context.Background(), rq, metav1.CreateOptions{})
+	if err != nil && strings.Contains(err.Error(), "already exists") {
+		_, err = k8sClientset.CoreV1().ResourceQuotas(team.Namespace).Update(context.Background(), rq, metav1.UpdateOptions{})
+	}
+	return err
 }
 
 // handleListTeams returns all teams
