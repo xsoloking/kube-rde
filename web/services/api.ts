@@ -234,6 +234,8 @@ export interface User {
   created: number;
   created_at?: string;
   ssh_keys?: SSHKey[];
+  team_id?: number;
+  team?: Team;
 }
 
 export interface ResourceConfig {
@@ -301,6 +303,7 @@ export interface UpdateUserRequest {
   email?: string;
   enabled?: boolean;
   roles?: string[];
+  team_id?: number | null;
 }
 
 export interface Agent {
@@ -324,6 +327,8 @@ export interface Workspace {
   description?: string;
   owner_id: string;
   owner?: User;
+  team_id?: number;
+  team?: Team;
   storage_size: string;
   storage_class: string;
   pvc_name?: string;
@@ -484,3 +489,59 @@ export interface AuditLogFilter {
   limit?: number;
   offset?: number;
 }
+
+// Team Types (Multi-tenant)
+export interface Team {
+  id: number;
+  name: string;
+  display_name: string;
+  namespace: string;
+  status: 'active' | 'suspended';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TeamQuota {
+  id: number;
+  team_id: number;
+  resource_config_id: number;
+  quota: number;
+  resource_config?: ResourceConfig;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TeamQuotaWithUsage extends TeamQuota {
+  used?: number;
+  resource_name?: string;
+}
+
+export interface CreateTeamRequest {
+  name: string;
+  display_name: string;
+}
+
+export interface UpdateTeamRequest {
+  display_name?: string;
+  status?: 'active' | 'suspended';
+}
+
+export interface UpdateTeamQuotaRequest {
+  quotas: {
+    resource_config_id: number;
+    quota: number;
+  }[];
+}
+
+// Teams API (admin only)
+export const teamsApi = {
+  list: () => api.get<Team[]>('/api/admin/teams'),
+  get: (id: number) => api.get<Team>(`/api/admin/teams/${id}`),
+  create: (team: CreateTeamRequest) => api.post<Team>('/api/admin/teams', team),
+  update: (id: number, team: UpdateTeamRequest) => api.put<Team>(`/api/admin/teams/${id}`, team),
+  delete: (id: number) => api.delete(`/api/admin/teams/${id}`),
+  getMembers: (id: number) => api.get<User[]>(`/api/admin/teams/${id}/members`),
+  getQuota: (id: number) => api.get<TeamQuotaWithUsage[]>(`/api/admin/teams/${id}/quota`),
+  updateQuota: (id: number, request: UpdateTeamQuotaRequest) =>
+    api.put<TeamQuotaWithUsage[]>(`/api/admin/teams/${id}/quota`, request),
+};
