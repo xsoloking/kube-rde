@@ -21,6 +21,8 @@ type User struct {
 	Username           string           `gorm:"uniqueIndex" json:"username"`
 	Email              string           `json:"email"`
 	FullName           string           `json:"full_name"`
+	TeamID             *uint            `json:"team_id,omitempty"`
+	Team               *Team            `gorm:"foreignKey:TeamID" json:"team,omitempty"`
 	DefaultWorkspaceID sql.NullString   `json:"default_workspace_id,omitempty"`
 	SSHKeys            *json.RawMessage `gorm:"type:jsonb" json:"ssh_keys,omitempty"` // Array of SSHKey objects
 	Workspaces         []Workspace      `gorm:"foreignKey:OwnerID;references:ID" json:"workspaces,omitempty"`
@@ -36,6 +38,8 @@ type Workspace struct {
 	Description  string    `json:"description"`
 	OwnerID      string    `gorm:"index" json:"owner_id"`
 	Owner        *User     `gorm:"foreignKey:OwnerID;references:ID" json:"owner,omitempty"`
+	TeamID       *uint     `json:"team_id,omitempty"`
+	Team         *Team     `gorm:"foreignKey:TeamID" json:"team,omitempty"`
 	Services     []Service `gorm:"foreignKey:WorkspaceID;references:ID" json:"services,omitempty"`
 	StorageSize  string    `gorm:"default:'50Gi'" json:"storage_size"`      // PVC storage capacity (e.g., "50Gi", "100Gi")
 	StorageClass string    `gorm:"default:'standard'" json:"storage_class"` // Kubernetes StorageClass for PVC
@@ -160,6 +164,39 @@ type AuditLog struct {
 	OldData    string    `json:"old_data"` // JSON
 	NewData    string    `json:"new_data"` // JSON
 	Timestamp  time.Time `json:"timestamp"`
+}
+
+// Team represents an organizational unit that owns a Kubernetes namespace
+type Team struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	Name        string    `gorm:"uniqueIndex;not null" json:"name"`     // e.g., "ai-team"
+	DisplayName string    `json:"display_name"`                          // e.g., "AI Research Team"
+	Namespace   string    `gorm:"uniqueIndex;not null" json:"namespace"` // e.g., "kuberde-ai-team"
+	Status      string    `gorm:"default:'active'" json:"status"`        // active, suspended
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// TableName specifies the table name for Team
+func (Team) TableName() string {
+	return "teams"
+}
+
+// TeamQuota represents a resource quota for a team
+type TeamQuota struct {
+	ID               uint           `gorm:"primaryKey" json:"id"`
+	TeamID           uint           `gorm:"index;not null" json:"team_id"`
+	ResourceConfigID int            `gorm:"not null" json:"resource_config_id"`
+	Quota            int            `gorm:"not null;default:0" json:"quota"`
+	Team             Team           `gorm:"foreignKey:TeamID" json:"team,omitempty"`
+	ResourceConfig   ResourceConfig `gorm:"foreignKey:ResourceConfigID" json:"resource_config,omitempty"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
+}
+
+// TableName specifies the table name for TeamQuota
+func (TeamQuota) TableName() string {
+	return "team_quotas"
 }
 
 // ResourceConfig is a singleton configuration for system-wide resource defaults
