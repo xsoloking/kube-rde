@@ -538,11 +538,11 @@ Type "DELETE" to confirm:`;
                       <button
                         onClick={handleSyncQuotas}
                         className="flex items-center gap-2 px-3 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded-lg transition-colors"
-                        title="Add missing resource types from global config"
+                        title="Sync resource types from global config"
                       >
                         <span className="material-symbols-outlined text-[18px]">sync</span>
                         <span className="text-[10px] font-bold uppercase tracking-widest">
-                          Sync Types
+                          Sync
                         </span>
                       </button>
                       <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-lg">

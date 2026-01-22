@@ -21,6 +21,18 @@ spec:
         fsGroup: 999  # PostgreSQL user ID
         runAsNonRoot: true
         runAsUser: 999
+      {{- with .Values.postgresql.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.postgresql.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.postgresql.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
       - name: postgresql
         image: {{ .Values.postgresql.image.repository }}:{{ .Values.postgresql.image.tag }}

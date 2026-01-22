@@ -67,6 +67,78 @@ KubeRDE is a lightweight, production-ready platform for managing remote developm
   - Template-based workspace creation
   - Agent status monitoring
 
+## 🎛️ Advanced Features
+
+### GPU Resource Management
+
+KubeRDE provides flexible GPU resource management for AI/ML workloads:
+
+- **Custom GPU Resource Types**: Configure GPU resources with custom Kubernetes resource names (e.g., `nvidia.com/gpu`, `amd.com/gpu`, `intel.com/gpu`)
+- **Node Scheduling Labels**: Set node selector labels (e.g., `nvidia.com/gpu.product=NVIDIA-A100-80GB`) to schedule workloads on specific GPU types
+- **Multi-GPU Support**: Define different GPU types for heterogeneous clusters (A100, H100, RTX 4090, etc.)
+- **One-Click Quota Sync**: Users can click **SYNC** on their profile page to automatically inherit all resource types from the system's resource management configuration
+
+**How it works:**
+1. Administrators configure GPU resource types in **Resource Management** with resource name and node labels
+2. Users click **SYNC** on their personal page to get all available resource types
+3. User quotas can be customized after sync to set specific limits per GPU type
+4. When creating services (agents), users can specify GPU resources to power AI/ML workloads
+
+### GPU-Enabled Services for AI Development
+
+Services (agents) in KubeRDE fully support GPU resource allocation for AI research and development:
+
+- **Per-Service GPU Allocation**: Each service can request specific GPU resources based on user quota
+- **AI/ML Workloads**: Run training jobs, inference servers, or GPU-accelerated Jupyter notebooks
+- **Flexible Resource Requests**: Specify CPU, memory, storage, and GPU resources independently per service
+- **Automatic Scheduling**: Kubernetes schedules GPU workloads to appropriate nodes based on configured labels
+
+### Custom Agent Templates
+
+Create reusable workspace templates with pre-configured settings for your team:
+
+- **Template Import/Export**: Share templates across environments with JSON export/import
+- **Pre-configured Services**: Define Docker images, ports, environment variables, and volume mounts
+- **Security Context**: Configure UID/GID and other security settings per template
+- **Multiple Agent Types**: Support for SSH, web-based IDEs, Jupyter notebooks, and custom services
+
+**Example Template (Claude Code UI):**
+```json
+{
+    "exported_at": "2026-01-03T00:01:37Z",
+    "template": {
+        "name": "claude-code-ui",
+        "agent_type": "web",
+        "description": "Claude Code UI",
+        "docker_image": "soloking/claude-code-ui",
+        "default_local_target": "localhost:3001",
+        "default_external_port": 3001,
+        "env_vars": {
+            "PORT": 3001,
+            "NODE_ENV": "production"
+        },
+        "security_context": {},
+        "volume_mounts": [
+            {
+                "name": "workspace",
+                "readOnly": false,
+                "mountPath": "/home/claudeui"
+            }
+        ]
+    },
+    "version": "1.0"
+}
+```
+
+**Template fields:**
+- `agent_type`: Service type (`ssh`, `web`, `jupyter`, `coder`, `file-browser`)
+- `docker_image`: Container image to use
+- `default_local_target`: Internal service address
+- `default_external_port`: Exposed port for external access
+- `env_vars`: Environment variables passed to the container
+- `volume_mounts`: Persistent storage configuration
+- `security_context`: Container security settings (UID, GID, capabilities)
+
 ## 🎬 See It In Action
 
 <!-- ![KubeRDE Demo](docs/images/demo.gif) -->

@@ -16,6 +16,22 @@ spec:
       labels:
         {{- include "kuberde.keycloak.selectorLabels" . | nindent 8 }}
     spec:
+      {{- with .Values.keycloak.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.keycloak.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.keycloak.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.keycloak.securityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
       - name: keycloak
         image: {{ .Values.keycloak.image.repository }}:{{ .Values.keycloak.image.tag }}
