@@ -7109,8 +7109,136 @@ func handleTeams(w http.ResponseWriter, r *http.Request) {
 
 // handleTeamByID routes team-specific requests (get, update, delete)
 func handleTeamByID(w http.ResponseWriter, r *http.Request) {
-	// For now, just handle the routing stub
-	// Individual team operations will be implemented in subsequent tasks
+	// Extract team ID from path: /api/admin/teams/{id}
+	path := strings.TrimPrefix(r.URL.Path, "/api/admin/teams/")
+	parts := strings.Split(path, "/")
+	if len(parts) == 0 || parts[0] == "" {
+		http.Error(w, "Team ID required", http.StatusBadRequest)
+		return
+	}
+
+	teamID, err := strconv.ParseUint(parts[0], 10, 32)
+	if err != nil {
+		http.Error(w, "Invalid team ID", http.StatusBadRequest)
+		return
+	}
+
+	// Check for sub-routes
+	if len(parts) > 1 {
+		switch parts[1] {
+		case "quota":
+			handleTeamQuota(w, r, uint(teamID))
+			return
+		case "members":
+			handleTeamMembers(w, r, uint(teamID))
+			return
+		}
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		handleGetTeam(w, r, uint(teamID))
+	case http.MethodPut:
+		handleUpdateTeam(w, r, uint(teamID))
+	case http.MethodDelete:
+		handleDeleteTeam(w, r, uint(teamID))
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func handleGetTeam(w http.ResponseWriter, r *http.Request, teamID uint) {
+	team, err := teamRepo.GetByID(teamID)
+	if err != nil {
+		http.Error(w, "Team not found", http.StatusNotFound)
+		return
+	}
+
+	members, _ := teamRepo.GetMembers(teamID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"team":         team,
+		"member_count": len(members),
+	})
+}
+
+func handleUpdateTeam(w http.ResponseWriter, r *http.Request, teamID uint) {
+	team, err := teamRepo.GetByID(teamID)
+	if err != nil {
+		http.Error(w, "Team not found", http.StatusNotFound)
+		return
+	}
+
+	var req struct {
+		DisplayName string `json:"display_name"`
+		Status      string `json:"status"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.DisplayName != "" {
+		team.DisplayName = req.DisplayName
+	}
+	if req.Status != "" {
+		team.Status = req.Status
+	}
+
+	if err := teamRepo.Update(team); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to update team: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(team)
+}
+
+func handleDeleteTeam(w http.ResponseWriter, r *http.Request, teamID uint) {
+	_, err := teamRepo.GetByID(teamID)
+	if err != nil {
+		http.Error(w, "Team not found", http.StatusNotFound)
+		return
+	}
+
+	members, _ := teamRepo.GetMembers(teamID)
+	if len(members) > 0 {
+		http.Error(w, "Cannot delete team with members", http.StatusConflict)
+		return
+	}
+
+	teamQuotaRepo.DeleteByTeamID(teamID)
+
+	if err := teamRepo.Delete(teamID); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to delete team: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func handleTeamMembers(w http.ResponseWriter, r *http.Request, teamID uint) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	members, err := teamRepo.GetMembers(teamID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get team members: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"members": members,
+	})
+}
+
+// Placeholder for Task 7
+func handleTeamQuota(w http.ResponseWriter, r *http.Request, teamID uint) {
 	http.Error(w, "Not implemented", http.StatusNotImplemented)
 }
 
