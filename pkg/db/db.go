@@ -76,6 +76,8 @@ func AutoMigrate() error {
 		&models.Service{},
 		&models.AuditLog{},
 		&models.AgentTemplate{},
+		&models.Team{},
+		&models.TeamQuota{},
 	)
 }
 
