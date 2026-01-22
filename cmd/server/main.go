@@ -295,19 +295,26 @@ func sanitizeK8sName(name string, maxLen int) string {
 // generateAgentName creates a unique agent name using userName, workspaceName, serviceName and hash
 // Format: kuberde-agent-{userName}-{workspaceName}-{serviceName}-{hash8}
 // The hash ensures uniqueness even if names collide
-func generateAgentName(userID, userName, workspaceID, workspaceName, serviceName string) string {
+func generateAgentName(teamName, userID, userName, workspaceID, workspaceName, serviceName string) string {
 	// Sanitize each component
-	userPart := sanitizeK8sName(userName, 20)
-	workspacePart := sanitizeK8sName(workspaceName, 20)
-	servicePart := sanitizeK8sName(serviceName, 20)
+	teamPart := sanitizeK8sName(teamName, 15)
+	userPart := sanitizeK8sName(userName, 15)
+	workspacePart := sanitizeK8sName(workspaceName, 15)
+	servicePart := sanitizeK8sName(serviceName, 15)
 
 	// Generate 8-character hash from IDs to ensure uniqueness
-	hashInput := userID + workspaceID + serviceName
+	hashInput := teamName + userID + workspaceID + serviceName
 	hash := sha256.Sum256([]byte(hashInput))
 	hashStr := fmt.Sprintf("%x", hash[:4]) // First 4 bytes = 8 hex chars
 
-	// Construct name: kuberde-agent-{user}-{workspace}-{service}-{hash}
-	agentName := fmt.Sprintf("kuberde-agent-%s-%s-%s-%s", userPart, workspacePart, servicePart, hashStr)
+	// Construct name: {team}-{user}-{workspace}-{service}-{hash}
+	// If no team, fall back to legacy format for backwards compatibility
+	var agentName string
+	if teamPart != "" {
+		agentName = fmt.Sprintf("%s-%s-%s-%s-%s", teamPart, userPart, workspacePart, servicePart, hashStr)
+	} else {
+		agentName = fmt.Sprintf("kuberde-agent-%s-%s-%s-%s", userPart, workspacePart, servicePart, hashStr)
+	}
 
 	return agentName
 }
@@ -3644,8 +3651,8 @@ func handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 			// If AgentID is empty but service has a template, try to derive it
 			if agentID == "" && service.TemplateID.Valid && user != nil {
-				// Try new naming convention first
-				derivedAgentID := generateAgentName(service.CreatedByID, user.Username, service.WorkspaceID, workspaces[i].Name, service.Name)
+				// Try new naming convention first (empty team for backwards compatibility)
+				derivedAgentID := generateAgentName("", service.CreatedByID, user.Username, service.WorkspaceID, workspaces[i].Name, service.Name)
 				if dynamicClient != nil {
 					_, err := dynamicClient.Resource(frpAgentGVR).Namespace(kuberdeNamespace).Get(context.TODO(), derivedAgentID, metav1.GetOptions{})
 					if err == nil {
@@ -3853,11 +3860,22 @@ func handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get user's team for namespace routing
+	var team *models.Team
+	if user.TeamID != nil && teamRepo != nil {
+		team, err = teamRepo.GetByID(*user.TeamID)
+		if err != nil {
+			log.Printf("WARNING: Failed to get user's team: %v", err)
+			// Continue without team - will use default namespace
+		}
+	}
+
 	// Create workspace
 	workspace := &models.Workspace{
 		Name:         req.Name,
 		Description:  req.Description,
 		OwnerID:      userID,
+		TeamID:       user.TeamID, // Inherit team from user
 		StorageSize:  req.StorageSize,
 		StorageClass: req.StorageClass,
 	}
@@ -3873,8 +3891,13 @@ func handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	// Create PVC in Kubernetes if client is available
 	if k8sClientset != nil {
+		// Get team namespace for PVC creation
+		teamNamespace := ""
+		if team != nil {
+			teamNamespace = team.Namespace
+		}
 		go func() {
-			if err := createWorkspacePVC(context.Background(), user.Username, workspace); err != nil {
+			if err := createWorkspacePVC(context.Background(), user.Username, workspace, teamNamespace); err != nil {
 				log.Printf("WARNING: Failed to create PVC %s: %v", pvcName, err)
 				// Don't fail the API call, PVC creation is async
 			} else {
@@ -4118,8 +4141,8 @@ func handleListWorkspaceServices(w http.ResponseWriter, r *http.Request) {
 
 		// If AgentID is empty but service has a template, try to derive and update it
 		if agentID == "" && services[i].TemplateID.Valid && services[i].WorkspaceID != "" && user != nil && workspace != nil {
-			// Try new naming convention first: kuberde-agent-{userName}-{workspaceName}-{serviceName}-{hash}
-			derivedAgentID := generateAgentName(services[i].CreatedByID, user.Username, services[i].WorkspaceID, workspace.Name, services[i].Name)
+			// Try new naming convention first (empty team for backwards compatibility)
+			derivedAgentID := generateAgentName("", services[i].CreatedByID, user.Username, services[i].WorkspaceID, workspace.Name, services[i].Name)
 
 			// Check if CR exists with this name
 			if dynamicClient != nil {
@@ -4558,7 +4581,17 @@ func handleCreateWorkspaceService(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		agentID, err := createRDEAgentFromTemplate(context.Background(), service, template, user, userID, workspaceID, workspace)
+		// Get user's team for namespace routing
+		var team *models.Team
+		if user.TeamID != nil && teamRepo != nil {
+			team, err = teamRepo.GetByID(*user.TeamID)
+			if err != nil {
+				log.Printf("WARNING: Failed to get user's team: %v", err)
+				// Continue without team - will use default namespace
+			}
+		}
+
+		agentID, err := createRDEAgentFromTemplate(context.Background(), service, template, user, userID, workspaceID, workspace, team)
 		if err != nil {
 			// Update service status to failed
 			service.Status = "failed"
@@ -5550,8 +5583,8 @@ func handleGetService(w http.ResponseWriter, r *http.Request, serviceID string) 
 		workspace, wsErr := dbpkg.WorkspaceRepo().FindByID(service.WorkspaceID)
 
 		if err == nil && user != nil && wsErr == nil && workspace != nil {
-			// Try new naming convention first: kuberde-agent-{userName}-{workspaceName}-{serviceName}-{hash}
-			derivedAgentID := generateAgentName(service.CreatedByID, user.Username, service.WorkspaceID, workspace.Name, service.Name)
+			// Try new naming convention first (empty team for backwards compatibility)
+			derivedAgentID := generateAgentName("", service.CreatedByID, user.Username, service.WorkspaceID, workspace.Name, service.Name)
 			log.Printf("[handleGetService] AgentID empty, trying new naming convention: %s", derivedAgentID)
 
 			// Check if CR exists with this name
@@ -6074,9 +6107,15 @@ func handleImportTemplates(w http.ResponseWriter, r *http.Request) {
 }
 
 // createWorkspacePVC creates a PersistentVolumeClaim for a workspace
-func createWorkspacePVC(ctx context.Context, userName string, workspace *models.Workspace) error {
+func createWorkspacePVC(ctx context.Context, userName string, workspace *models.Workspace, namespace string) error {
 	if k8sClientset == nil {
 		return fmt.Errorf("kubernetes client not available")
+	}
+
+	// Use team namespace if provided, otherwise fall back to kuberdeNamespace
+	targetNamespace := namespace
+	if targetNamespace == "" {
+		targetNamespace = kuberdeNamespace
 	}
 
 	// Use the PVCName already set on the workspace
@@ -6111,7 +6150,7 @@ func createWorkspacePVC(ctx context.Context, userName string, workspace *models.
 	pvc := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      pvcName,
-			Namespace: kuberdeNamespace,
+			Namespace: targetNamespace,
 			Labels: map[string]string{
 				"app":       "kuberde",
 				"type":      "workspace",
@@ -6132,7 +6171,7 @@ func createWorkspacePVC(ctx context.Context, userName string, workspace *models.
 		},
 	}
 
-	pvcClient := k8sClientset.CoreV1().PersistentVolumeClaims(kuberdeNamespace)
+	pvcClient := k8sClientset.CoreV1().PersistentVolumeClaims(targetNamespace)
 
 	_, err := pvcClient.Create(ctx, pvc, metav1.CreateOptions{})
 	if err != nil {
@@ -6140,7 +6179,7 @@ func createWorkspacePVC(ctx context.Context, userName string, workspace *models.
 		return fmt.Errorf("failed to create PVC: %w", err)
 	}
 
-	log.Printf("✓ Created PVC %s in namespace %s", pvcName, kuberdeNamespace)
+	log.Printf("✓ Created PVC %s in namespace %s", pvcName, targetNamespace)
 	return nil
 }
 
@@ -6156,16 +6195,24 @@ func mustParse(quantity string) resource.Quantity {
 
 // createRDEAgentFromTemplate creates an RDEAgent CR from an agent template
 // Returns the generated agent ID (CR name)
-func createRDEAgentFromTemplate(ctx context.Context, service *models.Service, template *models.AgentTemplate, user *models.User, userID, workspaceID string, workspace *models.Workspace) (string, error) {
+func createRDEAgentFromTemplate(ctx context.Context, service *models.Service, template *models.AgentTemplate, user *models.User, userID, workspaceID string, workspace *models.Workspace, team *models.Team) (string, error) {
 	if dynamicClient == nil {
 		// Kubernetes client not available, skip CR creation
 		log.Printf("WARNING: Kubernetes client not available, skipping RDEAgent CR creation for service %s", service.ID)
 		return "", nil
 	}
 
+	// Get team name and namespace
+	teamName := ""
+	targetNamespace := kuberdeNamespace
+	if team != nil {
+		teamName = team.Name
+		targetNamespace = team.Namespace
+	}
+
 	// Generate CR name using new naming convention with hash
-	// Format: kuberde-agent-{userName}-{workspaceName}-{serviceName}-{hash8}
-	crName := generateAgentName(userID, user.Username, workspaceID, workspace.Name, service.Name)
+	// Format: {team}-{userName}-{workspaceName}-{serviceName}-{hash8}
+	crName := generateAgentName(teamName, userID, user.Username, workspaceID, workspace.Name, service.Name)
 
 	// Parse template configuration
 	var templateEnvVars map[string]interface{}
@@ -6385,6 +6432,18 @@ func createRDEAgentFromTemplate(ctx context.Context, service *models.Service, te
 		}
 	}
 
+	// Build labels including team if available
+	labels := map[string]interface{}{
+		"app":       "kuberde",
+		"type":      "agent",
+		"user":      userID,
+		"workspace": workspaceID,
+		"service":   service.Name,
+	}
+	if team != nil {
+		labels["kuberde.io/team"] = team.Name
+	}
+
 	// Build RDEAgent CR following Operator's expected format
 	agent := &unstructured.Unstructured{
 		Object: map[string]interface{}{
@@ -6392,27 +6451,21 @@ func createRDEAgentFromTemplate(ctx context.Context, service *models.Service, te
 			"kind":       "RDEAgent",
 			"metadata": map[string]interface{}{
 				"name":      crName,
-				"namespace": kuberdeNamespace,
-				"labels": map[string]interface{}{
-					"app":       "kuberde",
-					"type":      "agent",
-					"user":      userID,
-					"workspace": workspaceID,
-					"service":   service.Name,
-				},
+				"namespace": targetNamespace,
+				"labels":    labels,
 			},
 			"spec": spec,
 		},
 	}
 
 	// Create the RDEAgent CR
-	_, err := dynamicClient.Resource(frpAgentGVR).Namespace(kuberdeNamespace).Create(ctx, agent, metav1.CreateOptions{})
+	_, err := dynamicClient.Resource(frpAgentGVR).Namespace(targetNamespace).Create(ctx, agent, metav1.CreateOptions{})
 	if err != nil {
 		log.Printf("Failed to create RDEAgent CR %s: %v", crName, err)
 		return "", fmt.Errorf("failed to create RDEAgent CR: %w", err)
 	}
 
-	log.Printf("✓ Created RDEAgent CR %s from template %s", crName, template.AgentType)
+	log.Printf("✓ Created RDEAgent CR %s in namespace %s from template %s", crName, targetNamespace, template.AgentType)
 	return crName, nil
 }
 
@@ -6643,8 +6696,8 @@ func handleAdminListWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 			// If AgentID is empty but service has a template, try to derive it
 			if agentID == "" && service.TemplateID.Valid && user != nil {
-				// Try new naming convention first
-				derivedAgentID := generateAgentName(service.CreatedByID, user.Username, service.WorkspaceID, workspaces[i].Name, service.Name)
+				// Try new naming convention first (empty team for backwards compatibility)
+				derivedAgentID := generateAgentName("", service.CreatedByID, user.Username, service.WorkspaceID, workspaces[i].Name, service.Name)
 				if dynamicClient != nil {
 					_, err := dynamicClient.Resource(frpAgentGVR).Namespace(kuberdeNamespace).Get(context.TODO(), derivedAgentID, metav1.GetOptions{})
 					if err == nil {
