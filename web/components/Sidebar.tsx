@@ -58,6 +58,7 @@ const Sidebar: React.FC = () => {
             <div className="h-px bg-border-dark mx-2 mb-2 opacity-50"></div>
             <NavItem to="/admin/workspaces" icon="folder_managed" label="All Workspaces" />
             <NavItem to="/users" icon="group" label="Users" />
+            <NavItem to="/teams" icon="groups" label="Teams" />
             <NavItem to="/agent-templates" icon="category" label="Agent Templates" />
             <NavItem to="/resource-management" icon="storage" label="Resource Management" />
             <NavItem to="/admin/audit" icon="history_edu" label="Audit Logs" />

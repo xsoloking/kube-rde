@@ -7,6 +7,8 @@ import Header from './components/Header';
 import Login from './pages/Login';
 import UserManagement from './pages/UserManagement';
 import UserEdit from './pages/UserEdit';
+import TeamManagement from './pages/TeamManagement';
+import TeamQuotaEdit from './pages/TeamQuotaEdit';
 import AgentTemplates from './pages/AgentTemplates';
 import ResourceManagement from './pages/ResourceManagement';
 import AdminWorkspaces from './pages/AdminWorkspaces';
@@ -60,6 +62,22 @@ const AppLayout: React.FC = () => {
               element={
                 <ProtectedRoute>
                   <UserEdit />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/teams"
+              element={
+                <ProtectedRoute requiredRole="admin">
+                  <TeamManagement />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/teams/:id/quota"
+              element={
+                <ProtectedRoute requiredRole="admin">
+                  <TeamQuotaEdit />
                 </ProtectedRoute>
               }
             />

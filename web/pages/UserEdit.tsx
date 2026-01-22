@@ -5,12 +5,14 @@ import {
   userQuotaApi,
   resourceConfigApi,
   sshKeysApi,
+  teamsApi,
   UserQuota,
   User as ApiUser,
   ResourceConfig,
   StorageClassConfig,
   GPUTypeConfig,
   SSHKey,
+  Team,
 } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -21,6 +23,8 @@ const UserEdit: React.FC = () => {
   const [quota, setQuota] = useState<UserQuota | null>(null);
   const [resourceConfig, setResourceConfig] = useState<ResourceConfig | null>(null);
   const [sshKeys, setSSHKeys] = useState<SSHKey[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,19 +67,25 @@ const UserEdit: React.FC = () => {
       }
 
       // Load remaining data
-      // Only admin users need resource config (for editing quotas)
+      // Only admin users need resource config (for editing quotas) and teams
       const dataPromises: Promise<unknown>[] = [userQuotaApi.get(id), sshKeysApi.list(id)];
 
       if (isAdminUser) {
         dataPromises.push(resourceConfigApi.get());
+        dataPromises.push(teamsApi.list());
       }
 
       const results = await Promise.all(dataPromises);
       const quotaData = results[0] as UserQuota;
       const keysData = results[1] as SSHKey[];
       const configData = isAdminUser ? (results[2] as ResourceConfig) : null;
+      const teamsData = isAdminUser ? (results[3] as Team[]) : [];
 
       setSSHKeys(keysData || []);
+      setTeams(teamsData || []);
+
+      // Set selected team from user data
+      setSelectedTeamId((userData as ApiUser).team_id || null);
 
       // Parse resource config if available (admin only)
       if (configData) {
@@ -96,6 +106,25 @@ const UserEdit: React.FC = () => {
       console.error('Failed to load user data:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleTeamChange = async (teamId: number | null) => {
+    if (!id || !isAdmin) return;
+
+    try {
+      setSaving(true);
+      await usersApi.update(id, { team_id: teamId });
+      setSelectedTeamId(teamId);
+      // Also update user state
+      if (user) {
+        setUser({ ...user, team_id: teamId || undefined });
+      }
+    } catch (err) {
+      console.error('Failed to update team:', err);
+      alert('Failed to update team assignment');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -442,6 +471,33 @@ Type "DELETE" to confirm:`;
                         )}
                       </div>
                     </div>
+                    {isAdmin && (
+                      <div>
+                        <label className="block text-text-secondary text-[10px] uppercase tracking-widest font-bold mb-2">
+                          Team Assignment
+                        </label>
+                        <select
+                          value={selectedTeamId || ''}
+                          onChange={(e) =>
+                            handleTeamChange(e.target.value ? parseInt(e.target.value, 10) : null)
+                          }
+                          disabled={saving}
+                          className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-white text-sm focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all appearance-none cursor-pointer disabled:opacity-50"
+                        >
+                          <option value="">No Team</option>
+                          {teams.map((team) => (
+                            <option key={team.id} value={team.id}>
+                              {team.display_name}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-text-secondary text-[10px] mt-1">
+                          {selectedTeamId
+                            ? `Namespace: ${teams.find((t) => t.id === selectedTeamId)?.namespace || 'N/A'}`
+                            : 'User resources will use default namespace'}
+                        </p>
+                      </div>
+                    )}
                   </div>
                   <button className="w-full flex items-center justify-between px-4 py-3.5 bg-background-dark hover:bg-surface-highlight border border-border-dark rounded-xl text-xs font-bold uppercase tracking-widest text-text-secondary hover:text-white transition-all group">
                     <span className="flex items-center gap-2">
