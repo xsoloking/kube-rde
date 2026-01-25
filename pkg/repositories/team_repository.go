@@ -15,6 +15,7 @@ type TeamRepository interface {
 	Update(team *models.Team) error
 	Delete(id uint) error
 	GetMembers(teamID uint) ([]models.User, error)
+	Count() (int64, error)
 }
 
 type teamRepository struct {
@@ -75,4 +76,12 @@ func (r *teamRepository) GetMembers(teamID uint) ([]models.User, error) {
 		return nil, err
 	}
 	return users, nil
+}
+
+func (r *teamRepository) Count() (int64, error) {
+	var count int64
+	if err := r.db.Model(&models.Team{}).Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
 }

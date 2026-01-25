@@ -4,6 +4,7 @@ import { api, Workspace } from '../services/api';
 
 interface AdminStats {
   total_users: number;
+  total_teams: number;
   total_workspaces: number;
   total_services: number;
   active_services: number;
@@ -88,11 +89,15 @@ const AdminWorkspaces: React.FC = () => {
         <div className="bg-surface-dark p-6 rounded-xl border border-border-dark shadow-sm">
           <div className="flex justify-between items-start mb-2">
             <p className="text-xs font-bold text-text-secondary uppercase tracking-widest">
-              Total Users
+              Total Teams & Users
             </p>
             <span className="material-symbols-outlined text-blue-500 text-[20px]">group</span>
           </div>
-          <p className="text-3xl font-bold">{stats?.total_users ?? '-'}</p>
+          <div className="flex items-baseline gap-2">
+            <p className="text-3xl font-bold">{stats?.total_users ?? '-'}</p>
+            <span className="text-sm text-text-secondary">users</span>
+          </div>
+          <p className="text-[10px] text-text-secondary mt-1">{stats?.total_teams ?? 0} Teams</p>
         </div>
 
         <div className="bg-surface-dark p-6 rounded-xl border border-border-dark shadow-sm">

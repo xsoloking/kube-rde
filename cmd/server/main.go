@@ -7085,9 +7085,16 @@ func handleGetAdminStats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Calculate team count
+	teamCount, err := teamRepo.Count()
+	if err != nil {
+		log.Printf("Failed to count teams: %v", err)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"total_users":       userCount,
+		"total_teams":       teamCount,
 		"total_workspaces":  workspaceCount,
 		"total_services":    serviceCount,
 		"active_services":   activeServiceCount,
