@@ -45,9 +45,9 @@ spec:
           protocol: TCP
         env:
         - name: KUBERDE_SERVER_API
-          value: "http://{{ include "kuberde.fullname" . }}-server:{{ .Values.server.service.port }}"
+          value: "http://{{ include "kuberde.fullname" . }}-server.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.server.service.port }}"
         - name: KEYCLOAK_URL
-          value: "http://{{ include "kuberde.fullname" . }}-keycloak:{{ .Values.keycloak.service.port }}"
+          value: "http://{{ include "kuberde.fullname" . }}-keycloak.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.keycloak.service.port }}"
         - name: KUBERDE_AGENT_IMAGE
           value: {{ include "kuberde.image" (dict "Values" .Values "componentImage" "kuberde-agent") }}
         - name: LOG_LEVEL

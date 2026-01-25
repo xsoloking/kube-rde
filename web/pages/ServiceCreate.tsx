@@ -141,8 +141,13 @@ const ServiceCreate: React.FC = () => {
       setSshKeyName('');
       setSshKeyPublic('');
       setShowSshKeyForm(false);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to add SSH key';
+    } catch (err: unknown) {
+      let message = 'Failed to add SSH key';
+      if (err && typeof err === 'object' && 'message' in err) {
+        message = (err as { message: string }).message;
+      } else if (err instanceof Error) {
+        message = err.message;
+      }
       setError(message);
       console.error('Error adding SSH key:', err);
     } finally {
@@ -190,8 +195,13 @@ const ServiceCreate: React.FC = () => {
 
       await servicesApi.create(workspaceId, payload);
       navigate(`/workspaces/${workspaceId}`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to create service';
+    } catch (err: unknown) {
+      let message = 'Failed to create service';
+      if (err && typeof err === 'object' && 'message' in err) {
+        message = (err as { message: string }).message;
+      } else if (err instanceof Error) {
+        message = err.message;
+      }
       setError(message);
       console.error('Error creating service:', err);
     } finally {

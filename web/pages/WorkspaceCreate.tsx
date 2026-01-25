@@ -85,8 +85,13 @@ const WorkspaceCreate: React.FC = () => {
         storage_class: storageClass,
       });
       navigate('/workspaces');
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to create workspace';
+    } catch (err: unknown) {
+      let message = 'Failed to create workspace';
+      if (err && typeof err === 'object' && 'message' in err) {
+        message = (err as { message: string }).message;
+      } else if (err instanceof Error) {
+        message = err.message;
+      }
       setError(message);
       console.error('Error creating workspace:', err);
     } finally {

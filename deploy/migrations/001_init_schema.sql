@@ -46,6 +46,49 @@ CREATE TABLE public.resource_configs (
 );
 
 
+-- public.teams definition
+
+-- Drop table
+
+-- DROP TABLE public.teams;
+
+CREATE TABLE public.teams (
+	id serial4 NOT NULL,
+	"name" varchar(255) NOT NULL,
+	display_name varchar(255) NOT NULL,
+	"namespace" varchar(255) NOT NULL,
+	status varchar(50) DEFAULT 'active'::character varying NOT NULL,
+	created_at timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	updated_at timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	CONSTRAINT teams_pkey PRIMARY KEY (id),
+	CONSTRAINT teams_name_key UNIQUE (name),
+	CONSTRAINT teams_namespace_key UNIQUE (namespace)
+);
+CREATE INDEX idx_teams_name ON public.teams USING btree (name);
+CREATE INDEX idx_teams_status ON public.teams USING btree (status);
+
+
+-- public.team_quotas definition
+
+-- Drop table
+
+-- DROP TABLE public.team_quotas;
+
+CREATE TABLE public.team_quotas (
+	id serial4 NOT NULL,
+	team_id int4 NOT NULL,
+	cpu_cores int4 DEFAULT 0 NOT NULL,
+	memory_gi int4 DEFAULT 0 NOT NULL,
+	storage_quota jsonb DEFAULT '[]'::jsonb NULL,
+	gpu_quota jsonb DEFAULT '[]'::jsonb NULL,
+	created_at timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	updated_at timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	CONSTRAINT team_quotas_pkey PRIMARY KEY (id),
+	CONSTRAINT team_quotas_team_id_key UNIQUE (team_id)
+);
+CREATE INDEX idx_team_quotas_team_id ON public.team_quotas USING btree (team_id);
+
+
 -- public.tunnel_connections definition
 
 -- Drop table
@@ -166,6 +209,7 @@ CREATE TABLE public.users (
 	email varchar(255) NULL,
 	full_name varchar(255) NULL,
 	default_workspace_id varchar(255) NULL,
+	team_id int4 NULL,
 	created_at timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	updated_at timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	ssh_keys jsonb DEFAULT '[]'::jsonb NULL, -- Array of SSH public keys
@@ -173,6 +217,7 @@ CREATE TABLE public.users (
 	CONSTRAINT users_username_key UNIQUE (username)
 );
 CREATE INDEX idx_users_username ON public.users USING btree (username);
+CREATE INDEX idx_users_team_id ON public.users USING btree (team_id);
 
 -- Column comments
 
@@ -190,6 +235,7 @@ CREATE TABLE public.workspaces (
 	"name" varchar(255) NOT NULL,
 	description text NULL,
 	owner_id varchar(255) NOT NULL,
+	team_id int4 NULL,
 	created_at timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	updated_at timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	storage_size varchar(20) DEFAULT '50Gi'::character varying NULL,
@@ -199,6 +245,7 @@ CREATE TABLE public.workspaces (
 );
 CREATE INDEX idx_workspaces_owner_id ON public.workspaces USING btree (owner_id);
 CREATE INDEX idx_workspaces_pvc_name ON public.workspaces USING btree (pvc_name);
+CREATE INDEX idx_workspaces_team_id ON public.workspaces USING btree (team_id);
 
 
 -- public.audit_logs foreign keys
@@ -226,6 +273,17 @@ ALTER TABLE public.users ADD CONSTRAINT fk_users_default_workspace FOREIGN KEY (
 -- public.workspaces foreign keys
 
 ALTER TABLE public.workspaces ADD CONSTRAINT workspaces_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.users(id) ON DELETE CASCADE;
+ALTER TABLE public.workspaces ADD CONSTRAINT workspaces_team_id_fkey FOREIGN KEY (team_id) REFERENCES public.teams(id) ON DELETE SET NULL;
+
+
+-- public.team_quotas foreign keys
+
+ALTER TABLE public.team_quotas ADD CONSTRAINT team_quotas_team_id_fkey FOREIGN KEY (team_id) REFERENCES public.teams(id) ON DELETE CASCADE;
+
+
+-- public.users foreign keys (team_id)
+
+ALTER TABLE public.users ADD CONSTRAINT users_team_id_fkey FOREIGN KEY (team_id) REFERENCES public.teams(id) ON DELETE SET NULL;
 
 -- =====================================================
 -- SEED DATA: Agent Templates
@@ -313,10 +371,12 @@ INSERT INTO resource_configs (
 -- +goose StatementBegin
 DROP TABLE IF EXISTS tunnel_connections;
 DROP TABLE IF EXISTS user_quotas;
+DROP TABLE IF EXISTS team_quotas;
 DROP TABLE IF EXISTS resource_configs;
 DROP TABLE IF EXISTS audit_logs;
 DROP TABLE IF EXISTS services;
 DROP TABLE IF EXISTS agent_templates;
 DROP TABLE IF EXISTS workspaces;
 DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS teams;
 -- +goose StatementEnd

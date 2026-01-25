@@ -1,16 +1,15 @@
 {{- if .Values.server.enabled }}
 {{- if .Values.server.rbac.create }}
 apiVersion: {{ include "rbac.apiVersion" . }}
-kind: RoleBinding
+kind: ClusterRoleBinding
 metadata:
-  name: {{ include "kuberde.fullname" . }}-server
-  namespace: {{ .Release.Namespace }}
+  name: {{ include "kuberde.fullname" . }}-server-binding
   labels:
     {{- include "kuberde.server.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: {{ include "kuberde.fullname" . }}-server
+  kind: ClusterRole
+  name: {{ include "kuberde.fullname" . }}-server-role
 subjects:
 - kind: ServiceAccount
   name: {{ include "kuberde.fullname" . }}-server

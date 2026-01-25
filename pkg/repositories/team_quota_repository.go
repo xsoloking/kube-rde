@@ -4,17 +4,17 @@ import (
 	"kuberde/pkg/models"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type TeamQuotaRepository interface {
 	Create(quota *models.TeamQuota) error
 	GetByID(id uint) (*models.TeamQuota, error)
-	GetByTeamID(teamID uint) ([]models.TeamQuota, error)
-	GetByTeamAndResource(teamID uint, resourceConfigID int) (*models.TeamQuota, error)
+	GetByTeamID(teamID uint) (*models.TeamQuota, error)
 	Update(quota *models.TeamQuota) error
 	Delete(id uint) error
 	DeleteByTeamID(teamID uint) error
-	UpsertBatch(teamID uint, quotas []models.TeamQuota) error
+	Upsert(quota *models.TeamQuota) error
 }
 
 type teamQuotaRepository struct {
@@ -31,23 +31,15 @@ func (r *teamQuotaRepository) Create(quota *models.TeamQuota) error {
 
 func (r *teamQuotaRepository) GetByID(id uint) (*models.TeamQuota, error) {
 	var quota models.TeamQuota
-	if err := r.db.Preload("ResourceConfig").First(&quota, id).Error; err != nil {
+	if err := r.db.First(&quota, id).Error; err != nil {
 		return nil, err
 	}
 	return &quota, nil
 }
 
-func (r *teamQuotaRepository) GetByTeamID(teamID uint) ([]models.TeamQuota, error) {
-	var quotas []models.TeamQuota
-	if err := r.db.Preload("ResourceConfig").Where("team_id = ?", teamID).Find(&quotas).Error; err != nil {
-		return nil, err
-	}
-	return quotas, nil
-}
-
-func (r *teamQuotaRepository) GetByTeamAndResource(teamID uint, resourceConfigID int) (*models.TeamQuota, error) {
+func (r *teamQuotaRepository) GetByTeamID(teamID uint) (*models.TeamQuota, error) {
 	var quota models.TeamQuota
-	if err := r.db.Where("team_id = ? AND resource_config_id = ?", teamID, resourceConfigID).First(&quota).Error; err != nil {
+	if err := r.db.Where("team_id = ?", teamID).First(&quota).Error; err != nil {
 		return nil, err
 	}
 	return &quota, nil
@@ -65,17 +57,9 @@ func (r *teamQuotaRepository) DeleteByTeamID(teamID uint) error {
 	return r.db.Where("team_id = ?", teamID).Delete(&models.TeamQuota{}).Error
 }
 
-func (r *teamQuotaRepository) UpsertBatch(teamID uint, quotas []models.TeamQuota) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
-		for _, q := range quotas {
-			q.TeamID = teamID
-			result := tx.Where("team_id = ? AND resource_config_id = ?", teamID, q.ResourceConfigID).
-				Assign(models.TeamQuota{Quota: q.Quota}).
-				FirstOrCreate(&q)
-			if result.Error != nil {
-				return result.Error
-			}
-		}
-		return nil
-	})
+func (r *teamQuotaRepository) Upsert(quota *models.TeamQuota) error {
+	return r.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "team_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"cpu_cores", "memory_gi", "storage_quota", "gpu_quota", "updated_at"}),
+	}).Create(quota).Error
 }

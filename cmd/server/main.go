@@ -78,8 +78,8 @@ var (
 	agentDomain = "frp.byai.uk"         // Default agent domain (used for *.frp.byai.uk)
 
 	// Agent configuration
-	agentServerURL  = "ws://kuberde-server:8080/ws" // Default WebSocket URL for agents
-	agentAuthSecret = "kuberde-agents-auth"         // Default auth secret name for agents
+	agentServerURL  = "ws://kuberde-server.kuberde.svc.cluster.local:8080/ws" // Default WebSocket URL for agents (FQDN for cross-namespace)
+	agentAuthSecret = "kuberde-agents-auth"                                   // Default auth secret name for agents
 
 	// Namespace configuration
 	kuberdeNamespace = "kuberde" // Default namespace for PVCs and RDEAgents
@@ -295,26 +295,18 @@ func sanitizeK8sName(name string, maxLen int) string {
 // generateAgentName creates a unique agent name using userName, workspaceName, serviceName and hash
 // Format: kuberde-agent-{userName}-{workspaceName}-{serviceName}-{hash8}
 // The hash ensures uniqueness even if names collide
-func generateAgentName(teamName, userID, userName, workspaceID, workspaceName, serviceName string) string {
+func generateAgentName(userID, userName, workspaceID, workspaceName, serviceName string) string {
 	// Sanitize each component
-	teamPart := sanitizeK8sName(teamName, 15)
 	userPart := sanitizeK8sName(userName, 15)
 	workspacePart := sanitizeK8sName(workspaceName, 15)
 	servicePart := sanitizeK8sName(serviceName, 15)
 
 	// Generate 8-character hash from IDs to ensure uniqueness
-	hashInput := teamName + userID + workspaceID + serviceName
+	hashInput := userID + workspaceID + serviceName
 	hash := sha256.Sum256([]byte(hashInput))
 	hashStr := fmt.Sprintf("%x", hash[:4]) // First 4 bytes = 8 hex chars
 
-	// Construct name: {team}-{user}-{workspace}-{service}-{hash}
-	// If no team, fall back to legacy format for backwards compatibility
-	var agentName string
-	if teamPart != "" {
-		agentName = fmt.Sprintf("%s-%s-%s-%s-%s", teamPart, userPart, workspacePart, servicePart, hashStr)
-	} else {
-		agentName = fmt.Sprintf("kuberde-agent-%s-%s-%s-%s", userPart, workspacePart, servicePart, hashStr)
-	}
+	var agentName string = fmt.Sprintf("kuberde-agent-%s-%s-%s-%s", userPart, workspacePart, servicePart, hashStr)
 
 	return agentName
 }
@@ -672,6 +664,49 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 
 // ensureUserExists creates user record in database if it doesn't exist
 // Also creates default workspace for new users
+// hasAdminRole checks if the user has admin role in their JWT claims
+func hasAdminRole(roles []string) bool {
+	for _, role := range roles {
+		if role == "admin" {
+			return true
+		}
+	}
+	return false
+}
+
+// autoAssignToAdminTeam assigns a user to the admin team if they have no team
+func autoAssignToAdminTeam(userID string, username string) error {
+	if db == nil || teamRepo == nil {
+		return nil // Skip if DB not ready
+	}
+
+	userRepo := dbpkg.UserRepo()
+	user, err := userRepo.FindByID(userID)
+	if err != nil || user == nil {
+		return fmt.Errorf("user not found: %v", err)
+	}
+
+	// Skip if user already has a team
+	if user.TeamID != nil {
+		return nil
+	}
+
+	// Get admin team
+	adminTeam, err := teamRepo.GetByName("admin")
+	if err != nil || adminTeam == nil {
+		return fmt.Errorf("admin team not found: %v", err)
+	}
+
+	// Assign user to admin team
+	user.TeamID = &adminTeam.ID
+	if err := userRepo.Update(user); err != nil {
+		return fmt.Errorf("failed to update user team: %v", err)
+	}
+
+	log.Printf("✓ Auto-assigned admin user %s to admin team", username)
+	return nil
+}
+
 func ensureUserExists(userID string, username string, email string, fullName string) error {
 	if db == nil {
 		// Database not initialized - this is a fatal error for on-demand user creation
@@ -779,12 +814,15 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract user claims
+	// Extract user claims including roles
 	var claims struct {
 		Subject           string `json:"sub"`
 		PreferredUsername string `json:"preferred_username"`
 		Email             string `json:"email"`
 		Name              string `json:"name"`
+		RealmAccess       struct {
+			Roles []string `json:"roles"`
+		} `json:"realm_access"`
 	}
 	if err := idToken.Claims(&claims); err != nil {
 		http.Error(w, "Failed to parse claims: "+err.Error(), http.StatusInternalServerError)
@@ -797,6 +835,13 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 		// Don't block login if database fails
 	}
 
+	// Auto-assign admin role users to admin team
+	if hasAdminRole(claims.RealmAccess.Roles) {
+		if err := autoAssignToAdminTeam(claims.Subject, claims.PreferredUsername); err != nil {
+			log.Printf("WARNING: Failed to auto-assign user to admin team: %v", err)
+		}
+	}
+
 	// Derive cookie domain from agentDomain for wildcard cookie sharing
 	// This allows cookies to work across main domain and agent subdomains
 	// Examples:
@@ -805,6 +850,11 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 	cookieDomain := getRootDomain(agentDomain)
 
 	// Set Session Cookie
+	// SameSite must be consistent between login and logout for cookie to be properly cleared
+	sameSite := http.SameSiteLaxMode
+	if isSecureDeployment() {
+		sameSite = http.SameSiteNoneMode // Required for cross-site cookies with Secure=true
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     "kuberde_session",
 		Value:    rawIDToken, // In prod, encrypt this or use session store
@@ -812,6 +862,7 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 		Domain:   cookieDomain, // Wildcard cookie
 		HttpOnly: true,
 		Secure:   isSecureDeployment(),
+		SameSite: sameSite,
 		Expires:  oauth2Token.Expiry,
 	})
 
@@ -1519,9 +1570,12 @@ func handleGetLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get team namespace for this agent
+	targetNamespace := getNamespaceForAgentID(agentID)
+
 	// Find Pod through Deployment (deployment name = agentID)
 	// Get deployment first to find its pod selector
-	deployment, err := k8sClientset.AppsV1().Deployments(kuberdeNamespace).Get(context.TODO(), agentID, metav1.GetOptions{})
+	deployment, err := k8sClientset.AppsV1().Deployments(targetNamespace).Get(context.TODO(), agentID, metav1.GetOptions{})
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to get deployment: %v", err), http.StatusInternalServerError)
 		return
@@ -1536,7 +1590,7 @@ func handleGetLogs(w http.ResponseWriter, r *http.Request) {
 		labelSelector += fmt.Sprintf("%s=%s", k, v)
 	}
 
-	pods, err := k8sClientset.CoreV1().Pods(kuberdeNamespace).List(context.TODO(), metav1.ListOptions{
+	pods, err := k8sClientset.CoreV1().Pods(targetNamespace).List(context.TODO(), metav1.ListOptions{
 		LabelSelector: labelSelector,
 	})
 	if err != nil {
@@ -1554,7 +1608,7 @@ func handleGetLogs(w http.ResponseWriter, r *http.Request) {
 	// Try to get logs from 'workload' container, fallback to 'kuberde-agent' if needed
 	containerName := "workload"
 
-	req := k8sClientset.CoreV1().Pods(kuberdeNamespace).GetLogs(podName, &corev1.PodLogOptions{
+	req := k8sClientset.CoreV1().Pods(targetNamespace).GetLogs(podName, &corev1.PodLogOptions{
 		TailLines: &tail,
 		Container: containerName,
 	})
@@ -1709,7 +1763,8 @@ func (c *wsConn) SetWriteDeadline(t time.Time) error {
 func getAgentNamespaceAndName(agentID string) (namespace, crName string) {
 	// Parse agentID format: "user-{owner}-{name}" or just "{name}"
 	// Return namespace and CR name
-	namespace = kuberdeNamespace
+	// Try to get namespace from service lookup first
+	namespace = getNamespaceForAgentID(agentID)
 
 	if strings.HasPrefix(agentID, "user-") {
 		parts := strings.SplitN(agentID, "-", 3)
@@ -1722,6 +1777,57 @@ func getAgentNamespaceAndName(agentID string) (namespace, crName string) {
 		crName = agentID
 	}
 	return namespace, crName
+}
+
+// getNamespaceForService returns the team namespace for a service, or kuberdeNamespace if no team
+func getNamespaceForService(service *models.Service) string {
+	if service == nil {
+		return kuberdeNamespace
+	}
+
+	// Get workspace to find team
+	workspace, err := dbpkg.WorkspaceRepo().FindByID(service.WorkspaceID)
+	if err != nil || workspace == nil {
+		log.Printf("WARNING: Failed to get workspace %s for namespace lookup: %v", service.WorkspaceID, err)
+		return kuberdeNamespace
+	}
+
+	return getNamespaceForWorkspace(workspace)
+}
+
+// getNamespaceForWorkspace returns the team namespace for a workspace, or kuberdeNamespace if no team
+func getNamespaceForWorkspace(workspace *models.Workspace) string {
+	if workspace == nil || workspace.TeamID == nil {
+		return kuberdeNamespace
+	}
+
+	if teamRepo == nil {
+		return kuberdeNamespace
+	}
+
+	team, err := teamRepo.GetByID(*workspace.TeamID)
+	if err != nil || team == nil {
+		log.Printf("WARNING: Failed to get team %d for namespace lookup: %v", *workspace.TeamID, err)
+		return kuberdeNamespace
+	}
+
+	return team.Namespace
+}
+
+// getNamespaceForAgentID returns the team namespace for an agent by looking up the service
+func getNamespaceForAgentID(agentID string) string {
+	if agentID == "" {
+		return kuberdeNamespace
+	}
+
+	// Try to find a service with this agentID
+	services, err := dbpkg.ServiceRepo().FindByAgentID(agentID)
+	if err != nil || len(services) == 0 {
+		log.Printf("WARNING: No service found for agent %s, using default namespace", agentID)
+		return kuberdeNamespace
+	}
+
+	return getNamespaceForService(services[0])
 }
 
 func isAgentScaledDown(agentID string) (bool, error) {
@@ -1940,8 +2046,8 @@ func handleListAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// List CRDs
-	list, err := dynamicClient.Resource(frpAgentGVR).Namespace(kuberdeNamespace).List(context.TODO(), metav1.ListOptions{})
+	// List CRDs from all namespaces (admin view)
+	list, err := dynamicClient.Resource(frpAgentGVR).Namespace("").List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		log.Printf("Failed to list agents: %v", err)
 		http.Error(w, "Failed to list agents", http.StatusInternalServerError)
@@ -2083,6 +2189,7 @@ func handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var claims struct {
+		Subject           string `json:"sub"`
 		PreferredUsername string `json:"preferred_username"`
 	}
 	if err := token.Claims(&claims); err != nil {
@@ -2101,6 +2208,18 @@ func handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get user's team namespace
+	targetNamespace := kuberdeNamespace
+	if db != nil {
+		user, err := dbpkg.UserRepo().FindByID(claims.Subject)
+		if err == nil && user != nil && user.TeamID != nil && teamRepo != nil {
+			team, err := teamRepo.GetByID(*user.TeamID)
+			if err == nil && team != nil {
+				targetNamespace = team.Namespace
+			}
+		}
+	}
+
 	// Construct Peer ID
 	agentID := fmt.Sprintf("user-%s-%s", claims.PreferredUsername, req.Name)
 
@@ -2117,7 +2236,7 @@ func handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 			"kind":       "RDEAgent",
 			"metadata": map[string]interface{}{
 				"name":      agentID,
-				"namespace": kuberdeNamespace,
+				"namespace": targetNamespace,
 			},
 			"spec": map[string]interface{}{
 				"serverUrl":   agentServerURL,
@@ -2143,7 +2262,7 @@ func handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	_, err = dynamicClient.Resource(frpAgentGVR).Namespace(kuberdeNamespace).Create(context.TODO(), agent, metav1.CreateOptions{})
+	_, err = dynamicClient.Resource(frpAgentGVR).Namespace(targetNamespace).Create(context.TODO(), agent, metav1.CreateOptions{})
 	if err != nil {
 		log.Printf("Failed to create agent %s: %v", agentID, err)
 		http.Error(w, "Failed to create agent", http.StatusInternalServerError)
@@ -2171,11 +2290,16 @@ func handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	agentID := pathParts[3]
 
-	err = dynamicClient.Resource(frpAgentGVR).Namespace(kuberdeNamespace).Delete(context.TODO(), agentID, metav1.DeleteOptions{})
+	// Get namespace for this agent (look up via service)
+	targetNamespace := getNamespaceForAgentID(agentID)
+
+	err = dynamicClient.Resource(frpAgentGVR).Namespace(targetNamespace).Delete(context.TODO(), agentID, metav1.DeleteOptions{})
 	if err != nil {
+		log.Printf("Failed to delete agent %s from namespace %s: %v", agentID, targetNamespace, err)
 		http.Error(w, "Failed to delete agent", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("✓ Deleted agent %s from namespace %s", agentID, targetNamespace)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -2230,7 +2354,8 @@ func handleGetGlobalStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	list, err := dynamicClient.Resource(frpAgentGVR).Namespace(kuberdeNamespace).List(context.TODO(), metav1.ListOptions{})
+	// List from all namespaces for global stats
+	list, err := dynamicClient.Resource(frpAgentGVR).Namespace("").List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		http.Error(w, "Failed to list agents", http.StatusInternalServerError)
 		return
@@ -2362,7 +2487,12 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 		idTokenHint = cookie.Value
 	}
 
-	// Clear session cookie - must match the same domain as login
+	// Clear session cookie - must match the same attributes as login
+	// SameSite must be consistent between login and logout for cookie to be properly cleared
+	sameSite := http.SameSiteLaxMode
+	if isSecureDeployment() {
+		sameSite = http.SameSiteNoneMode // Required for cross-site cookies with Secure=true
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     "kuberde_session",
 		Value:    "",
@@ -2371,7 +2501,7 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 		HttpOnly: true,
 		Secure:   isSecureDeployment(),
-		SameSite: http.SameSiteNoneMode,
+		SameSite: sameSite,
 	})
 
 	// Clear state cookie
@@ -2844,35 +2974,63 @@ func handleGetUser(w http.ResponseWriter, r *http.Request, userID string) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	// Get team_id from local database
+	var teamID *uint
+	userRepo := dbpkg.UserRepo()
+	localUser, err := userRepo.FindByID(userID)
+	if err == nil && localUser != nil && localUser.TeamID != nil {
+		teamID = localUser.TeamID
+	}
+
+	response := map[string]interface{}{
 		"id":       *user.ID,
 		"username": *user.Username,
 		"email":    user.Email,
 		"enabled":  *user.Enabled,
 		"created":  user.CreatedTimestamp,
 		"roles":    roleNames,
-	}); err != nil {
+	}
+
+	if teamID != nil {
+		response["team_id"] = *teamID
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Failed to encode user details: %v", err)
 	}
 }
 
 // handleUpdateUser updates a user's attributes
 func handleUpdateUser(w http.ResponseWriter, r *http.Request, userID string) {
+	// Use json.RawMessage to detect if team_id field was provided (even if null)
+	var rawReq map[string]json.RawMessage
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := json.Unmarshal(bodyBytes, &rawReq); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
 	var req struct {
 		Email   *string  `json:"email"`
 		Enabled *bool    `json:"enabled"`
 		Roles   []string `json:"roles"`
+		TeamID  *int     `json:"team_id"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(bodyBytes, &req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	ctx := context.Background()
 
-	// Get existing user
+	// Get existing user from Keycloak
 	user, err := keycloakClient.GetUserByID(
 		ctx,
 		getAdminToken(),
@@ -2884,7 +3042,7 @@ func handleUpdateUser(w http.ResponseWriter, r *http.Request, userID string) {
 		return
 	}
 
-	// Update fields
+	// Update Keycloak fields
 	if req.Email != nil {
 		user.Email = gocloak.StringP(*req.Email)
 	}
@@ -2892,7 +3050,7 @@ func handleUpdateUser(w http.ResponseWriter, r *http.Request, userID string) {
 		user.Enabled = gocloak.BoolP(*req.Enabled)
 	}
 
-	// Update user
+	// Update user in Keycloak
 	err = keycloakClient.UpdateUser(
 		ctx,
 		getAdminToken(),
@@ -2902,6 +3060,38 @@ func handleUpdateUser(w http.ResponseWriter, r *http.Request, userID string) {
 	if err != nil {
 		http.Error(w, "Failed to update user", http.StatusInternalServerError)
 		return
+	}
+
+	// Update team_id in local database if the field was provided in the request
+	// Check if team_id key exists in the raw request (handles both null and valid values)
+	if _, hasTeamID := rawReq["team_id"]; hasTeamID {
+		userRepo := dbpkg.UserRepo()
+		localUser, _ := userRepo.FindByID(userID)
+		if localUser == nil {
+			// User doesn't exist in local DB, create it
+			localUser = &models.User{
+				ID:       userID,
+				Username: *user.Username,
+			}
+			if user.Email != nil {
+				localUser.Email = *user.Email
+			}
+		}
+
+		if req.TeamID == nil || *req.TeamID == 0 {
+			// Remove team assignment (null or 0)
+			localUser.TeamID = nil
+		} else {
+			teamID := uint(*req.TeamID)
+			localUser.TeamID = &teamID
+		}
+
+		if err := userRepo.Upsert(localUser); err != nil {
+			log.Printf("Failed to update user team_id: %v", err)
+			http.Error(w, "Failed to update user team assignment", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("Updated user %s team_id to %v", userID, localUser.TeamID)
 	}
 
 	// Update roles if provided
@@ -3003,6 +3193,9 @@ func handleDeleteUser(w http.ResponseWriter, r *http.Request, userID string) {
 
 		// Delete all workspaces (which will cascade delete services via database foreign keys)
 		for _, workspace := range workspaces {
+			// Get team namespace for this workspace
+			workspaceNamespace := getNamespaceForWorkspace(&workspace)
+
 			// Get all services in this workspace to delete their RDEAgent CRs
 			serviceRepo := dbpkg.ServiceRepo()
 			services, err := serviceRepo.FindByWorkspaceID(workspace.ID, 1000, 0) // Get all services
@@ -3013,15 +3206,15 @@ func handleDeleteUser(w http.ResponseWriter, r *http.Request, userID string) {
 			// Delete RDEAgent CRs for each service
 			for _, service := range services {
 				if service.AgentID != "" && dynamicClient != nil {
-					err := dynamicClient.Resource(frpAgentGVR).Namespace(kuberdeNamespace).Delete(
+					err := dynamicClient.Resource(frpAgentGVR).Namespace(workspaceNamespace).Delete(
 						ctx,
 						service.AgentID,
 						metav1.DeleteOptions{},
 					)
 					if err != nil {
-						log.Printf("WARNING: Failed to delete RDEAgent CR %s: %v", service.AgentID, err)
+						log.Printf("WARNING: Failed to delete RDEAgent CR %s in namespace %s: %v", service.AgentID, workspaceNamespace, err)
 					} else {
-						log.Printf("✓ Deleted RDEAgent CR: %s", service.AgentID)
+						log.Printf("✓ Deleted RDEAgent CR: %s from namespace %s", service.AgentID, workspaceNamespace)
 					}
 				}
 			}
@@ -3235,14 +3428,10 @@ func handleUserSSHKeys(w http.ResponseWriter, r *http.Request, userID string, pa
 			http.Error(w, "Failed to fetch user: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		if user == nil {
-			http.Error(w, "User not found", http.StatusNotFound)
-			return
-		}
 
-		// Parse SSH keys from JSONB
+		// Parse SSH keys from JSONB (return empty array if user not in local DB)
 		var sshKeys []models.SSHKey
-		if user.SSHKeys != nil {
+		if user != nil && user.SSHKeys != nil {
 			if err := json.Unmarshal(*user.SSHKeys, &sshKeys); err != nil {
 				log.Printf("ERROR: Failed to parse SSH keys: %v", err)
 				sshKeys = []models.SSHKey{}
@@ -3269,15 +3458,31 @@ func handleUserSSHKeys(w http.ResponseWriter, r *http.Request, userID string, pa
 			return
 		}
 
-		// Get user
+		// Get user from local DB, create if not exists
 		user, err := userRepo.FindByID(userID)
 		if err != nil {
 			http.Error(w, "Failed to fetch user: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		if user == nil {
-			http.Error(w, "User not found", http.StatusNotFound)
-			return
+			// User not in local DB, get info from Keycloak and create
+			ctx := context.Background()
+			kcUser, err := keycloakClient.GetUserByID(ctx, getAdminToken(), "kuberde", userID)
+			if err != nil {
+				http.Error(w, "User not found in Keycloak", http.StatusNotFound)
+				return
+			}
+			user = &models.User{
+				ID:       userID,
+				Username: *kcUser.Username,
+			}
+			if kcUser.Email != nil {
+				user.Email = *kcUser.Email
+			}
+			if err := userRepo.Create(user); err != nil {
+				http.Error(w, "Failed to create user: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
 		}
 
 		// Parse existing SSH keys
@@ -3645,6 +3850,9 @@ func handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		// Get team namespace for this workspace
+		workspaceNamespace := getNamespaceForWorkspace(&workspaces[i])
+
 		for j := range workspaces[i].Services {
 			service := &workspaces[i].Services[j]
 			agentID := service.AgentID
@@ -3652,15 +3860,15 @@ func handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
 			// If AgentID is empty but service has a template, try to derive it
 			if agentID == "" && service.TemplateID.Valid && user != nil {
 				// Try new naming convention first (empty team for backwards compatibility)
-				derivedAgentID := generateAgentName("", service.CreatedByID, user.Username, service.WorkspaceID, workspaces[i].Name, service.Name)
+				derivedAgentID := generateAgentName(service.CreatedByID, user.Username, service.WorkspaceID, workspaces[i].Name, service.Name)
 				if dynamicClient != nil {
-					_, err := dynamicClient.Resource(frpAgentGVR).Namespace(kuberdeNamespace).Get(context.TODO(), derivedAgentID, metav1.GetOptions{})
+					_, err := dynamicClient.Resource(frpAgentGVR).Namespace(workspaceNamespace).Get(context.TODO(), derivedAgentID, metav1.GetOptions{})
 					if err == nil {
 						agentID = derivedAgentID
 					} else {
 						// Try old naming convention as fallback
 						oldAgentID := fmt.Sprintf("kuberde-%s-%s-%s", service.CreatedByID, service.WorkspaceID, service.Name)
-						_, err := dynamicClient.Resource(frpAgentGVR).Namespace(kuberdeNamespace).Get(context.TODO(), oldAgentID, metav1.GetOptions{})
+						_, err := dynamicClient.Resource(frpAgentGVR).Namespace(workspaceNamespace).Get(context.TODO(), oldAgentID, metav1.GetOptions{})
 						if err == nil {
 							agentID = oldAgentID
 						}
@@ -3675,7 +3883,7 @@ func handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 			// Try to get CR status from Kubernetes
 			if dynamicClient != nil {
-				cr, err := dynamicClient.Resource(frpAgentGVR).Namespace(kuberdeNamespace).Get(context.TODO(), agentID, metav1.GetOptions{})
+				cr, err := dynamicClient.Resource(frpAgentGVR).Namespace(workspaceNamespace).Get(context.TODO(), agentID, metav1.GetOptions{})
 				if err == nil {
 					// Extract status from CR
 					if status, found, err := unstructured.NestedMap(cr.Object, "status"); found && err == nil {
@@ -3802,71 +4010,74 @@ func handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		req.StorageClass = "standard"
 	}
 
-	// Validate storage size and class against user quota
-	if resourceConfigRepo != nil && userQuotaRepo != nil {
-		// Parse storage size
-		sizeGi := parseStorageSize(req.StorageSize)
-
-		// Get or create user quota
-		quota, err := userQuotaRepo.GetByUserID(userID)
-		if err != nil {
-			// Create default quota if missing
-			config, _ := resourceConfigRepo.GetConfig()
-			if config != nil {
-				quota = createDefaultQuota(userID, config)
-				if err := userQuotaRepo.Create(quota); err != nil {
-					log.Printf("Failed to create default user quota: %v", err)
-				}
-			}
-		}
-
-		if quota != nil {
-			// Check if StorageClass is supported
-			config, _ := resourceConfigRepo.GetConfig()
-			if config != nil && !isStorageClassSupported(req.StorageClass, config.StorageClasses) {
-				http.Error(w, "StorageClass not supported", http.StatusBadRequest)
-				return
-			}
-
-			// Check storage quota
-			if quota.StorageQuota != nil {
-				var items []models.UserStorageQuotaItem
-				if err := json.Unmarshal(*quota.StorageQuota, &items); err == nil {
-					found := false
-					for _, item := range items {
-						if item.Name == req.StorageClass {
-							found = true
-							if sizeGi > item.LimitGi {
-								http.Error(w, fmt.Sprintf("Storage size %dGi exceeds quota %dGi for class %s", sizeGi, item.LimitGi, req.StorageClass), http.StatusForbidden)
-								return
-							}
-							break
-						}
-					}
-					if !found {
-						// No quota defined for this class
-						http.Error(w, fmt.Sprintf("No quota for storage class %s", req.StorageClass), http.StatusForbidden)
-						return
-					}
-				}
-			}
-		}
-	}
-
-	// Get user information for PVC naming
+	// Get user information first
 	user, err := dbpkg.UserRepo().FindByID(userID)
 	if err != nil || user == nil {
 		http.Error(w, "Failed to get user information", http.StatusInternalServerError)
 		return
 	}
 
-	// Get user's team for namespace routing
+	// Enforce team membership - users must belong to a team to create workspaces
+	if user.TeamID == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error":   "You must be a member of a team to create workspaces. Please contact your administrator to be assigned to a team.",
+			"message": "You must be a member of a team to create workspaces. Please contact your administrator to be assigned to a team.",
+		})
+		return
+	}
+
+	// Get user's team for namespace routing and quota validation
 	var team *models.Team
-	if user.TeamID != nil && teamRepo != nil {
+	if teamRepo != nil {
 		team, err = teamRepo.GetByID(*user.TeamID)
 		if err != nil {
-			log.Printf("WARNING: Failed to get user's team: %v", err)
-			// Continue without team - will use default namespace
+			log.Printf("ERROR: Failed to get user's team %d: %v", *user.TeamID, err)
+			http.Error(w, "Failed to get team information", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Validate storage size and class against team quota
+	if resourceConfigRepo != nil && teamQuotaRepo != nil && team != nil {
+		// Parse storage size
+		sizeGi := parseStorageSize(req.StorageSize)
+
+		// Get team quota
+		teamQuota, err := teamQuotaRepo.GetByTeamID(team.ID)
+		if err != nil {
+			log.Printf("WARNING: Failed to get team quota for team %d: %v", team.ID, err)
+		}
+
+		// Check if StorageClass is supported
+		config, _ := resourceConfigRepo.GetConfig()
+		if config != nil && !isStorageClassSupported(req.StorageClass, config.StorageClasses) {
+			http.Error(w, "StorageClass not supported", http.StatusBadRequest)
+			return
+		}
+
+		// Check storage quota from team
+		if teamQuota != nil && teamQuota.StorageQuota != nil {
+			var items []models.StorageQuotaItem
+			if err := json.Unmarshal(teamQuota.StorageQuota, &items); err == nil {
+				found := false
+				for _, item := range items {
+					if item.Name == req.StorageClass {
+						found = true
+						if sizeGi > item.LimitGi {
+							http.Error(w, fmt.Sprintf("Storage size %dGi exceeds team quota %dGi for class %s", sizeGi, item.LimitGi, req.StorageClass), http.StatusForbidden)
+							return
+						}
+						break
+					}
+				}
+				if !found {
+					// No quota defined for this class
+					http.Error(w, fmt.Sprintf("No quota for storage class %s in team", req.StorageClass), http.StatusForbidden)
+					return
+				}
+			}
 		}
 	}
 
@@ -3998,13 +4209,16 @@ func handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get team namespace for this workspace
+	targetNamespace := getNamespaceForWorkspace(workspace)
+
 	// Delete all agents (RDEAgent CRs) associated with services in this workspace
 	services, err := dbpkg.ServiceRepo().FindByWorkspaceID(workspaceID, 1000, 0)
 	if err == nil && dynamicClient != nil {
 		for _, service := range services {
 			if service.AgentID != "" {
-				log.Printf("Deleting agent CR %s for service %s", service.AgentID, service.ID)
-				err := dynamicClient.Resource(frpAgentGVR).Namespace(kuberdeNamespace).Delete(context.TODO(), service.AgentID, metav1.DeleteOptions{})
+				log.Printf("Deleting agent CR %s for service %s in namespace %s", service.AgentID, service.ID, targetNamespace)
+				err := dynamicClient.Resource(frpAgentGVR).Namespace(targetNamespace).Delete(context.TODO(), service.AgentID, metav1.DeleteOptions{})
 				if err != nil {
 					log.Printf("WARNING: Failed to delete agent CR %s: %v", service.AgentID, err)
 				}
@@ -4014,7 +4228,7 @@ func handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	// Delete PVC if it exists
 	if workspace.PVCName != "" && k8sClientset != nil {
-		pvcClient := k8sClientset.CoreV1().PersistentVolumeClaims(kuberdeNamespace)
+		pvcClient := k8sClientset.CoreV1().PersistentVolumeClaims(targetNamespace)
 		if err := pvcClient.Delete(context.Background(), workspace.PVCName, metav1.DeleteOptions{}); err != nil {
 			log.Printf("WARNING: Failed to delete PVC %s: %v", workspace.PVCName, err)
 			// Continue with workspace deletion even if PVC deletion fails
@@ -4135,6 +4349,9 @@ func handleListWorkspaceServices(w http.ResponseWriter, r *http.Request) {
 		workspace, _ = dbpkg.WorkspaceRepo().FindByID(workspaceID)
 	}
 
+	// Get team namespace for this workspace
+	targetNamespace := getNamespaceForWorkspace(workspace)
+
 	// Update service status from CR status (real-time)
 	for i := range services {
 		agentID := services[i].AgentID
@@ -4142,11 +4359,11 @@ func handleListWorkspaceServices(w http.ResponseWriter, r *http.Request) {
 		// If AgentID is empty but service has a template, try to derive and update it
 		if agentID == "" && services[i].TemplateID.Valid && services[i].WorkspaceID != "" && user != nil && workspace != nil {
 			// Try new naming convention first (empty team for backwards compatibility)
-			derivedAgentID := generateAgentName("", services[i].CreatedByID, user.Username, services[i].WorkspaceID, workspace.Name, services[i].Name)
+			derivedAgentID := generateAgentName(services[i].CreatedByID, user.Username, services[i].WorkspaceID, workspace.Name, services[i].Name)
 
 			// Check if CR exists with this name
 			if dynamicClient != nil {
-				_, err := dynamicClient.Resource(frpAgentGVR).Namespace(kuberdeNamespace).Get(context.TODO(), derivedAgentID, metav1.GetOptions{})
+				_, err := dynamicClient.Resource(frpAgentGVR).Namespace(targetNamespace).Get(context.TODO(), derivedAgentID, metav1.GetOptions{})
 				if err == nil {
 					// CR exists! Update the service record
 					services[i].AgentID = derivedAgentID
@@ -4159,7 +4376,7 @@ func handleListWorkspaceServices(w http.ResponseWriter, r *http.Request) {
 				} else {
 					// Try old naming convention as fallback: kuberde-{userID}-{workspaceID}-{serviceName}
 					oldAgentID := fmt.Sprintf("kuberde-%s-%s-%s", services[i].CreatedByID, services[i].WorkspaceID, services[i].Name)
-					_, err := dynamicClient.Resource(frpAgentGVR).Namespace(kuberdeNamespace).Get(context.TODO(), oldAgentID, metav1.GetOptions{})
+					_, err := dynamicClient.Resource(frpAgentGVR).Namespace(targetNamespace).Get(context.TODO(), oldAgentID, metav1.GetOptions{})
 					if err == nil {
 						services[i].AgentID = oldAgentID
 						if updateErr := dbpkg.ServiceRepo().Update(&services[i]); updateErr != nil {
@@ -4180,7 +4397,7 @@ func handleListWorkspaceServices(w http.ResponseWriter, r *http.Request) {
 
 		// Try to get CR status from Kubernetes
 		if dynamicClient != nil {
-			cr, err := dynamicClient.Resource(frpAgentGVR).Namespace(kuberdeNamespace).Get(context.TODO(), agentID, metav1.GetOptions{})
+			cr, err := dynamicClient.Resource(frpAgentGVR).Namespace(targetNamespace).Get(context.TODO(), agentID, metav1.GetOptions{})
 			if err == nil {
 				// Extract status from CR
 				if status, found, err := unstructured.NestedMap(cr.Object, "status"); found && err == nil {
@@ -4417,6 +4634,22 @@ func handleCreateWorkspaceService(w http.ResponseWriter, r *http.Request) {
 
 	if err := ensureUserExistsInDB(userID, r); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Enforce team membership - users must belong to a team to create services
+	user, err := dbpkg.UserRepo().FindByID(userID)
+	if err != nil || user == nil {
+		http.Error(w, "Failed to get user information", http.StatusInternalServerError)
+		return
+	}
+	if user.TeamID == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error":   "You must be a member of a team to create services. Please contact your administrator to be assigned to a team.",
+			"message": "You must be a member of a team to create services. Please contact your administrator to be assigned to a team.",
+		})
 		return
 	}
 
@@ -4942,16 +5175,17 @@ func handleDeleteService(w http.ResponseWriter, r *http.Request) {
 	// Delete RDEAgent CR if exists
 	if service.AgentID != "" && dynamicClient != nil {
 		ctx := context.Background()
-		err := dynamicClient.Resource(frpAgentGVR).Namespace(kuberdeNamespace).Delete(ctx, service.AgentID, metav1.DeleteOptions{})
+		targetNamespace := getNamespaceForService(service)
+		err := dynamicClient.Resource(frpAgentGVR).Namespace(targetNamespace).Delete(ctx, service.AgentID, metav1.DeleteOptions{})
 		if err != nil {
 			// Log error but don't fail the deletion if CR doesn't exist
 			if !strings.Contains(err.Error(), "not found") {
-				log.Printf("WARNING: Failed to delete RDEAgent CR %s: %v", service.AgentID, err)
+				log.Printf("WARNING: Failed to delete RDEAgent CR %s in namespace %s: %v", service.AgentID, targetNamespace, err)
 			} else {
-				log.Printf("RDEAgent CR %s not found, skipping deletion", service.AgentID)
+				log.Printf("RDEAgent CR %s not found in namespace %s, skipping deletion", service.AgentID, targetNamespace)
 			}
 		} else {
-			log.Printf("✓ Deleted RDEAgent CR %s for service %s", service.AgentID, serviceID)
+			log.Printf("✓ Deleted RDEAgent CR %s from namespace %s for service %s", service.AgentID, targetNamespace, serviceID)
 		}
 	}
 
@@ -5060,8 +5294,11 @@ func handleRestartService(w http.ResponseWriter, r *http.Request) {
 
 	ctx := context.Background()
 
+	// Get team namespace for this service
+	targetNamespace := getNamespaceForService(service)
+
 	// Find deployment to get pod selector
-	deployment, err := k8sClientset.AppsV1().Deployments(kuberdeNamespace).Get(ctx, service.AgentID, metav1.GetOptions{})
+	deployment, err := k8sClientset.AppsV1().Deployments(targetNamespace).Get(ctx, service.AgentID, metav1.GetOptions{})
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to get deployment: %v", err), http.StatusInternalServerError)
 		return
@@ -5077,7 +5314,7 @@ func handleRestartService(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// List pods for this service
-	pods, err := k8sClientset.CoreV1().Pods(kuberdeNamespace).List(ctx, metav1.ListOptions{
+	pods, err := k8sClientset.CoreV1().Pods(targetNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: labelSelector,
 	})
 	if err != nil {
@@ -5093,7 +5330,7 @@ func handleRestartService(w http.ResponseWriter, r *http.Request) {
 	// Delete all pods for this service to trigger restart
 	deletedPods := []string{}
 	for _, pod := range pods.Items {
-		err := k8sClientset.CoreV1().Pods(kuberdeNamespace).Delete(ctx, pod.Name, metav1.DeleteOptions{})
+		err := k8sClientset.CoreV1().Pods(targetNamespace).Delete(ctx, pod.Name, metav1.DeleteOptions{})
 		if err != nil {
 			log.Printf("WARNING: Failed to delete pod %s: %v", pod.Name, err)
 		} else {
@@ -5203,8 +5440,11 @@ func handleStopService(w http.ResponseWriter, r *http.Request) {
 
 	ctx := context.Background()
 
+	// Get team namespace for this service
+	targetNamespace := getNamespaceForService(service)
+
 	// Get the deployment
-	deployment, err := k8sClientset.AppsV1().Deployments(kuberdeNamespace).Get(ctx, service.AgentID, metav1.GetOptions{})
+	deployment, err := k8sClientset.AppsV1().Deployments(targetNamespace).Get(ctx, service.AgentID, metav1.GetOptions{})
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to get deployment: %v", err), http.StatusInternalServerError)
 		return
@@ -5214,13 +5454,13 @@ func handleStopService(w http.ResponseWriter, r *http.Request) {
 	replicas := int32(0)
 	deployment.Spec.Replicas = &replicas
 
-	_, err = k8sClientset.AppsV1().Deployments(kuberdeNamespace).Update(ctx, deployment, metav1.UpdateOptions{})
+	_, err = k8sClientset.AppsV1().Deployments(targetNamespace).Update(ctx, deployment, metav1.UpdateOptions{})
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to scale deployment: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("✓ Scaled deployment %s to 0 replicas for service %s", service.AgentID, serviceID)
+	log.Printf("✓ Scaled deployment %s to 0 replicas for service %s in namespace %s", service.AgentID, serviceID, targetNamespace)
 
 	// Update service status to stopped
 	service.Status = "stopped"
@@ -5328,8 +5568,11 @@ func handleStartService(w http.ResponseWriter, r *http.Request) {
 
 	ctx := context.Background()
 
+	// Get team namespace for this service
+	targetNamespace := getNamespaceForService(service)
+
 	// Get the deployment
-	deployment, err := k8sClientset.AppsV1().Deployments(kuberdeNamespace).Get(ctx, service.AgentID, metav1.GetOptions{})
+	deployment, err := k8sClientset.AppsV1().Deployments(targetNamespace).Get(ctx, service.AgentID, metav1.GetOptions{})
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to get deployment: %v", err), http.StatusInternalServerError)
 		return
@@ -5339,13 +5582,13 @@ func handleStartService(w http.ResponseWriter, r *http.Request) {
 	replicas := int32(1)
 	deployment.Spec.Replicas = &replicas
 
-	_, err = k8sClientset.AppsV1().Deployments(kuberdeNamespace).Update(ctx, deployment, metav1.UpdateOptions{})
+	_, err = k8sClientset.AppsV1().Deployments(targetNamespace).Update(ctx, deployment, metav1.UpdateOptions{})
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to scale deployment: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("✓ Scaled deployment %s to 1 replica for service %s", service.AgentID, serviceID)
+	log.Printf("✓ Scaled deployment %s to 1 replica for service %s in namespace %s", service.AgentID, serviceID, targetNamespace)
 
 	// Update service status to running
 	service.Status = "running"
@@ -5442,10 +5685,13 @@ func handleGetServiceLogs(w http.ResponseWriter, r *http.Request) {
 
 	ctx := context.Background()
 
+	// Get team namespace for this service
+	targetNamespace := getNamespaceForService(service)
+
 	// Find deployment to get pod selector
-	deployment, err := k8sClientset.AppsV1().Deployments(kuberdeNamespace).Get(ctx, service.AgentID, metav1.GetOptions{})
+	deployment, err := k8sClientset.AppsV1().Deployments(targetNamespace).Get(ctx, service.AgentID, metav1.GetOptions{})
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to get deployment: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Failed to get deployment in namespace %s: %v", targetNamespace, err), http.StatusInternalServerError)
 		return
 	}
 
@@ -5459,7 +5705,7 @@ func handleGetServiceLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// List pods for this service
-	pods, err := k8sClientset.CoreV1().Pods(kuberdeNamespace).List(ctx, metav1.ListOptions{
+	pods, err := k8sClientset.CoreV1().Pods(targetNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: labelSelector,
 	})
 	if err != nil {
@@ -5476,7 +5722,7 @@ func handleGetServiceLogs(w http.ResponseWriter, r *http.Request) {
 	tail := int64(500) // Get last 500 lines
 
 	// Get logs from specified container
-	req := k8sClientset.CoreV1().Pods(kuberdeNamespace).GetLogs(podName, &corev1.PodLogOptions{
+	req := k8sClientset.CoreV1().Pods(targetNamespace).GetLogs(podName, &corev1.PodLogOptions{
 		TailLines: &tail,
 		Container: container,
 	})
@@ -5574,7 +5820,8 @@ func handleGetService(w http.ResponseWriter, r *http.Request, serviceID string) 
 
 	// Update service status from CR status (real-time)
 	agentID := service.AgentID
-	log.Printf("[handleGetService] Service ID: %s, AgentID: %s", service.ID, agentID)
+	targetNamespace := getNamespaceForService(service)
+	log.Printf("[handleGetService] Service ID: %s, AgentID: %s, Namespace: %s", service.ID, agentID, targetNamespace)
 
 	// If AgentID is empty but service has a template, try to derive and update it
 	if agentID == "" && service.TemplateID.Valid && service.WorkspaceID != "" {
@@ -5584,12 +5831,12 @@ func handleGetService(w http.ResponseWriter, r *http.Request, serviceID string) 
 
 		if err == nil && user != nil && wsErr == nil && workspace != nil {
 			// Try new naming convention first (empty team for backwards compatibility)
-			derivedAgentID := generateAgentName("", service.CreatedByID, user.Username, service.WorkspaceID, workspace.Name, service.Name)
+			derivedAgentID := generateAgentName(service.CreatedByID, user.Username, service.WorkspaceID, workspace.Name, service.Name)
 			log.Printf("[handleGetService] AgentID empty, trying new naming convention: %s", derivedAgentID)
 
 			// Check if CR exists with this name
 			if dynamicClient != nil {
-				_, err := dynamicClient.Resource(frpAgentGVR).Namespace(kuberdeNamespace).Get(context.TODO(), derivedAgentID, metav1.GetOptions{})
+				_, err := dynamicClient.Resource(frpAgentGVR).Namespace(targetNamespace).Get(context.TODO(), derivedAgentID, metav1.GetOptions{})
 				if err == nil {
 					// CR exists! Update the service record
 					service.AgentID = derivedAgentID
@@ -5603,7 +5850,7 @@ func handleGetService(w http.ResponseWriter, r *http.Request, serviceID string) 
 					// Try old naming convention as fallback: kuberde-{userID}-{workspaceID}-{serviceName}
 					oldAgentID := fmt.Sprintf("kuberde-%s-%s-%s", service.CreatedByID, service.WorkspaceID, service.Name)
 					log.Printf("[handleGetService] New convention failed, trying old convention: %s", oldAgentID)
-					_, err := dynamicClient.Resource(frpAgentGVR).Namespace(kuberdeNamespace).Get(context.TODO(), oldAgentID, metav1.GetOptions{})
+					_, err := dynamicClient.Resource(frpAgentGVR).Namespace(targetNamespace).Get(context.TODO(), oldAgentID, metav1.GetOptions{})
 					if err == nil {
 						service.AgentID = oldAgentID
 						if updateErr := dbpkg.ServiceRepo().Update(service); updateErr != nil {
@@ -5624,7 +5871,7 @@ func handleGetService(w http.ResponseWriter, r *http.Request, serviceID string) 
 
 	if agentID != "" && dynamicClient != nil {
 		// Try to get CR status from Kubernetes
-		cr, err := dynamicClient.Resource(frpAgentGVR).Namespace(kuberdeNamespace).Get(context.TODO(), agentID, metav1.GetOptions{})
+		cr, err := dynamicClient.Resource(frpAgentGVR).Namespace(targetNamespace).Get(context.TODO(), agentID, metav1.GetOptions{})
 		if err == nil {
 			log.Printf("[handleGetService] CR found for AgentID: %s", agentID)
 			// Extract status from CR
@@ -6203,16 +6450,14 @@ func createRDEAgentFromTemplate(ctx context.Context, service *models.Service, te
 	}
 
 	// Get team name and namespace
-	teamName := ""
 	targetNamespace := kuberdeNamespace
 	if team != nil {
-		teamName = team.Name
 		targetNamespace = team.Namespace
 	}
 
 	// Generate CR name using new naming convention with hash
 	// Format: {team}-{userName}-{workspaceName}-{serviceName}-{hash8}
-	crName := generateAgentName(teamName, userID, user.Username, workspaceID, workspace.Name, service.Name)
+	crName := generateAgentName(userID, user.Username, workspaceID, workspace.Name, service.Name)
 
 	// Parse template configuration
 	var templateEnvVars map[string]interface{}
@@ -6478,8 +6723,11 @@ func updateRDEAgentSpec(ctx context.Context, service *models.Service) error {
 		return fmt.Errorf("service has no AgentID")
 	}
 
+	// Get the team namespace for this service
+	targetNamespace := getNamespaceForService(service)
+
 	// Get existing CR
-	agentCR, err := dynamicClient.Resource(frpAgentGVR).Namespace(kuberdeNamespace).Get(ctx, service.AgentID, metav1.GetOptions{})
+	agentCR, err := dynamicClient.Resource(frpAgentGVR).Namespace(targetNamespace).Get(ctx, service.AgentID, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get RDEAgent CR: %w", err)
 	}
@@ -6595,12 +6843,12 @@ func updateRDEAgentSpec(ctx context.Context, service *models.Service) error {
 
 	// Apply updates
 	agentCR.Object["spec"] = spec
-	_, err = dynamicClient.Resource(frpAgentGVR).Namespace(kuberdeNamespace).Update(ctx, agentCR, metav1.UpdateOptions{})
+	_, err = dynamicClient.Resource(frpAgentGVR).Namespace(targetNamespace).Update(ctx, agentCR, metav1.UpdateOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to update K8S resource: %w", err)
 	}
 
-	log.Printf("✓ Updated RDEAgent CR %s", service.AgentID)
+	log.Printf("✓ Updated RDEAgent CR %s in namespace %s", service.AgentID, targetNamespace)
 	return nil
 }
 
@@ -6690,6 +6938,9 @@ func handleAdminListWorkspaces(w http.ResponseWriter, r *http.Request) {
 			user, _ = dbpkg.UserRepo().FindByID(workspaces[i].OwnerID)
 		}
 
+		// Get team namespace for this workspace
+		workspaceNamespace := getNamespaceForWorkspace(&workspaces[i])
+
 		for j := range workspaces[i].Services {
 			service := &workspaces[i].Services[j]
 			agentID := service.AgentID
@@ -6697,15 +6948,15 @@ func handleAdminListWorkspaces(w http.ResponseWriter, r *http.Request) {
 			// If AgentID is empty but service has a template, try to derive it
 			if agentID == "" && service.TemplateID.Valid && user != nil {
 				// Try new naming convention first (empty team for backwards compatibility)
-				derivedAgentID := generateAgentName("", service.CreatedByID, user.Username, service.WorkspaceID, workspaces[i].Name, service.Name)
+				derivedAgentID := generateAgentName(service.CreatedByID, user.Username, service.WorkspaceID, workspaces[i].Name, service.Name)
 				if dynamicClient != nil {
-					_, err := dynamicClient.Resource(frpAgentGVR).Namespace(kuberdeNamespace).Get(context.TODO(), derivedAgentID, metav1.GetOptions{})
+					_, err := dynamicClient.Resource(frpAgentGVR).Namespace(workspaceNamespace).Get(context.TODO(), derivedAgentID, metav1.GetOptions{})
 					if err == nil {
 						agentID = derivedAgentID
 					} else {
 						// Try old naming convention as fallback
 						oldAgentID := fmt.Sprintf("kuberde-%s-%s-%s", service.CreatedByID, service.WorkspaceID, service.Name)
-						_, err := dynamicClient.Resource(frpAgentGVR).Namespace(kuberdeNamespace).Get(context.TODO(), oldAgentID, metav1.GetOptions{})
+						_, err := dynamicClient.Resource(frpAgentGVR).Namespace(workspaceNamespace).Get(context.TODO(), oldAgentID, metav1.GetOptions{})
 						if err == nil {
 							agentID = oldAgentID
 						}
@@ -6720,7 +6971,7 @@ func handleAdminListWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 			// Try to get CR status from Kubernetes
 			if dynamicClient != nil {
-				cr, err := dynamicClient.Resource(frpAgentGVR).Namespace(kuberdeNamespace).Get(context.TODO(), agentID, metav1.GetOptions{})
+				cr, err := dynamicClient.Resource(frpAgentGVR).Namespace(workspaceNamespace).Get(context.TODO(), agentID, metav1.GetOptions{})
 				if err == nil {
 					// Extract status from CR
 					if status, found, err := unstructured.NestedMap(cr.Object, "status"); found && err == nil {
@@ -7074,6 +7325,8 @@ func routeMainDomain(w http.ResponseWriter, r *http.Request) {
 		requireRole("admin")(handleTeams)(w, r)
 	case strings.HasPrefix(r.URL.Path, "/api/admin/teams/"):
 		requireRole("admin")(handleTeamByID)(w, r)
+	case strings.HasPrefix(r.URL.Path, "/api/teams/") && strings.HasSuffix(r.URL.Path, "/quota"):
+		handleUserTeamQuota(w, r)
 	case strings.HasPrefix(r.URL.Path, "/download/cli/"):
 		handleDownloadCLI(w, r)
 	default:
@@ -7183,7 +7436,12 @@ func handleTeamByID(w http.ResponseWriter, r *http.Request) {
 			handleTeamQuota(w, r, uint(teamID))
 			return
 		case "members":
-			handleTeamMembers(w, r, uint(teamID))
+			// Pass the rest of the path for member ID extraction
+			var memberID string
+			if len(parts) > 2 {
+				memberID = parts[2]
+			}
+			handleTeamMembers(w, r, uint(teamID), memberID)
 			return
 		}
 	}
@@ -7250,44 +7508,314 @@ func handleUpdateTeam(w http.ResponseWriter, r *http.Request, teamID uint) {
 }
 
 func handleDeleteTeam(w http.ResponseWriter, r *http.Request, teamID uint) {
-	_, err := teamRepo.GetByID(teamID)
+	team, err := teamRepo.GetByID(teamID)
 	if err != nil {
 		http.Error(w, "Team not found", http.StatusNotFound)
 		return
 	}
 
-	members, _ := teamRepo.GetMembers(teamID)
-	if len(members) > 0 {
-		http.Error(w, "Cannot delete team with members", http.StatusConflict)
-		return
+	// Delete all workspaces belonging to this team
+	workspaces, err := dbpkg.WorkspaceRepo().FindByTeamID(teamID)
+	if err != nil {
+		log.Printf("Warning: Failed to find workspaces for team %d: %v", teamID, err)
+	} else {
+		for _, workspace := range workspaces {
+			log.Printf("Deleting workspace %s (%s) belonging to team %s", workspace.ID, workspace.Name, team.Name)
+			if err := deleteWorkspaceWithResources(&workspace, team.Namespace); err != nil {
+				log.Printf("Warning: Failed to fully delete workspace %s: %v", workspace.ID, err)
+			}
+		}
 	}
 
+	// Remove team association from all members (set team_id to NULL)
+	members, _ := teamRepo.GetMembers(teamID)
+	for _, member := range members {
+		member.TeamID = nil
+		if err := dbpkg.UserRepo().Update(&member); err != nil {
+			log.Printf("Warning: Failed to remove team association from user %s: %v", member.Username, err)
+		}
+	}
+
+	// Delete team quota
 	teamQuotaRepo.DeleteByTeamID(teamID)
 
+	// Delete team from database
 	if err := teamRepo.Delete(teamID); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to delete team: %v", err), http.StatusInternalServerError)
 		return
 	}
 
+	// Force delete Kubernetes namespace (even if it has resources)
+	if err := deleteTeamNamespace(team); err != nil {
+		log.Printf("Warning: Failed to delete namespace for team %s: %v", team.Name, err)
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func handleTeamMembers(w http.ResponseWriter, r *http.Request, teamID uint) {
+// deleteWorkspaceWithResources deletes a workspace and all its K8s resources
+func deleteWorkspaceWithResources(workspace *models.Workspace, namespace string) error {
+	ctx := context.Background()
+
+	// Delete all agents (RDEAgent CRs) associated with services in this workspace
+	services, err := dbpkg.ServiceRepo().FindByWorkspaceID(workspace.ID, 1000, 0)
+	if err == nil && dynamicClient != nil {
+		for _, service := range services {
+			if service.AgentID != "" {
+				log.Printf("Deleting agent CR %s for service %s in namespace %s", service.AgentID, service.ID, namespace)
+				err := dynamicClient.Resource(frpAgentGVR).Namespace(namespace).Delete(ctx, service.AgentID, metav1.DeleteOptions{})
+				if err != nil && !strings.Contains(err.Error(), "not found") {
+					log.Printf("Warning: Failed to delete agent CR %s: %v", service.AgentID, err)
+				}
+			}
+		}
+	}
+
+	// Delete PVC if it exists
+	if workspace.PVCName != "" && k8sClientset != nil {
+		pvcClient := k8sClientset.CoreV1().PersistentVolumeClaims(namespace)
+		if err := pvcClient.Delete(ctx, workspace.PVCName, metav1.DeleteOptions{}); err != nil {
+			if !strings.Contains(err.Error(), "not found") {
+				log.Printf("Warning: Failed to delete PVC %s: %v", workspace.PVCName, err)
+			}
+		} else {
+			log.Printf("✓ Deleted PVC %s", workspace.PVCName)
+		}
+	}
+
+	// Delete workspace from database (cascades to services)
+	if err := dbpkg.WorkspaceRepo().Delete(workspace.ID); err != nil {
+		return fmt.Errorf("failed to delete workspace from database: %w", err)
+	}
+
+	log.Printf("✓ Deleted workspace %s (%s)", workspace.ID, workspace.Name)
+	return nil
+}
+
+// deleteTeamNamespace force deletes the Kubernetes namespace for a team
+func deleteTeamNamespace(team *models.Team) error {
+	if k8sClientset == nil {
+		return fmt.Errorf("kubernetes client not initialized")
+	}
+
+	ctx := context.Background()
+
+	// Check if namespace exists
+	_, err := k8sClientset.CoreV1().Namespaces().Get(ctx, team.Namespace, metav1.GetOptions{})
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			log.Printf("Namespace %s does not exist, skipping deletion", team.Namespace)
+			return nil
+		}
+		return err
+	}
+
+	// Delete all RDEAgents in the namespace first
+	if dynamicClient != nil {
+		rdeAgentGVR := schema.GroupVersionResource{
+			Group:    "kuberde.io",
+			Version:  "v1beta1",
+			Resource: "rdeagents",
+		}
+		err := dynamicClient.Resource(rdeAgentGVR).Namespace(team.Namespace).DeleteCollection(
+			ctx,
+			metav1.DeleteOptions{},
+			metav1.ListOptions{},
+		)
+		if err != nil && !strings.Contains(err.Error(), "not found") {
+			log.Printf("Warning: Failed to delete RDEAgents in namespace %s: %v", team.Namespace, err)
+		}
+	}
+
+	// Force delete namespace with propagation policy
+	propagationPolicy := metav1.DeletePropagationForeground
+	err = k8sClientset.CoreV1().Namespaces().Delete(ctx, team.Namespace, metav1.DeleteOptions{
+		PropagationPolicy: &propagationPolicy,
+	})
+	if err != nil && !strings.Contains(err.Error(), "not found") {
+		return err
+	}
+
+	log.Printf("Initiated deletion of namespace %s for team %s", team.Namespace, team.Name)
+	return nil
+}
+
+func handleTeamMembers(w http.ResponseWriter, r *http.Request, teamID uint, memberID string) {
+	userRepo := dbpkg.UserRepo()
+
+	switch r.Method {
+	case http.MethodGet:
+		// List team members
+		members, err := teamRepo.GetMembers(teamID)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get team members: %v", err), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"members": members,
+		})
+
+	case http.MethodPost:
+		// Add member to team
+		var req struct {
+			UserID string `json:"user_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+		if req.UserID == "" {
+			http.Error(w, "User ID is required", http.StatusBadRequest)
+			return
+		}
+
+		// Check if user exists in local DB
+		user, _ := userRepo.FindByID(req.UserID)
+		if user == nil {
+			// User not in local DB, get from Keycloak and create
+			ctx := context.Background()
+			kcUser, err := keycloakClient.GetUserByID(ctx, getAdminToken(), "kuberde", req.UserID)
+			if err != nil {
+				http.Error(w, "User not found", http.StatusNotFound)
+				return
+			}
+			user = &models.User{
+				ID:       req.UserID,
+				Username: *kcUser.Username,
+			}
+			if kcUser.Email != nil {
+				user.Email = *kcUser.Email
+			}
+			if err := userRepo.Create(user); err != nil {
+				http.Error(w, fmt.Sprintf("Failed to create user: %v", err), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		// Check if user is already a member of another team
+		if user.TeamID != nil && *user.TeamID != teamID {
+			// Get the other team's name for better error message
+			otherTeam, _ := teamRepo.GetByID(*user.TeamID)
+			teamName := "another team"
+			if otherTeam != nil {
+				teamName = otherTeam.DisplayName
+			}
+			http.Error(w, fmt.Sprintf("User is already a member of %s. A user can only belong to one team.", teamName), http.StatusConflict)
+			return
+		}
+
+		// Update user's team_id
+		teamIDUint := uint(teamID)
+		user.TeamID = &teamIDUint
+		if err := userRepo.Update(user); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to add member: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": "Member added successfully",
+			"user":    user,
+		})
+
+	case http.MethodDelete:
+		// Remove member from team
+		if memberID == "" {
+			http.Error(w, "Member ID is required", http.StatusBadRequest)
+			return
+		}
+
+		user, err := userRepo.FindByID(memberID)
+		if err != nil {
+			http.Error(w, "User not found", http.StatusNotFound)
+			return
+		}
+
+		// Verify user belongs to this team
+		if user.TeamID == nil || *user.TeamID != teamID {
+			http.Error(w, "User is not a member of this team", http.StatusBadRequest)
+			return
+		}
+
+		user.TeamID = nil
+		if err := userRepo.Update(user); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to remove member: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": "Member removed successfully",
+		})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleUserTeamQuota allows non-admin users to view their own team's quota
+// URL: /api/teams/{id}/quota
+func handleUserTeamQuota(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	members, err := teamRepo.GetMembers(teamID)
+	// Parse team ID from URL: /api/teams/{id}/quota
+	path := strings.TrimPrefix(r.URL.Path, "/api/teams/")
+	path = strings.TrimSuffix(path, "/quota")
+	teamID, err := strconv.ParseUint(path, 10, 64)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to get team members: %v", err), http.StatusInternalServerError)
+		http.Error(w, "Invalid team ID", http.StatusBadRequest)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"members": members,
-	})
+	// Authenticate user
+	token, err := validateCookie(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var claims struct {
+		PreferredUsername string `json:"preferred_username"`
+		Sub               string `json:"sub"`
+		RealmAccess       struct {
+			Roles []string `json:"roles"`
+		} `json:"realm_access"`
+	}
+	if err := token.Claims(&claims); err != nil {
+		http.Error(w, "Invalid token claims", http.StatusUnauthorized)
+		return
+	}
+
+	// Check if user is admin (admins can view any team)
+	isAdmin := false
+	for _, role := range claims.RealmAccess.Roles {
+		if role == "admin" {
+			isAdmin = true
+			break
+		}
+	}
+
+	// If not admin, check if user is a member of this team
+	if !isAdmin {
+		user, err := dbpkg.UserRepo().FindByID(claims.Sub)
+		if err != nil || user == nil {
+			http.Error(w, "User not found", http.StatusNotFound)
+			return
+		}
+
+		// Check if user belongs to the requested team
+		if user.TeamID == nil || uint(*user.TeamID) != uint(teamID) {
+			http.Error(w, "Forbidden: You can only view your own team's quota", http.StatusForbidden)
+			return
+		}
+	}
+
+	// User is authorized, return the team quota
+	handleGetTeamQuota(w, r, uint(teamID))
 }
 
 func handleTeamQuota(w http.ResponseWriter, r *http.Request, teamID uint) {
@@ -7314,26 +7842,60 @@ func handleGetTeamQuota(w http.ResponseWriter, r *http.Request, teamID uint) {
 		return
 	}
 
-	existingQuotas, err := teamQuotaRepo.GetByTeamID(teamID)
+	// Get existing team quota or create empty one
+	existingQuota, err := teamQuotaRepo.GetByTeamID(teamID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to get team quotas: %v", err), http.StatusInternalServerError)
-		return
+		// No existing quota, use defaults
+		existingQuota = &models.TeamQuota{
+			TeamID:       teamID,
+			CPUCores:     resourceConfig.DefaultCPUCores,
+			MemoryGi:     resourceConfig.DefaultMemoryGi,
+			StorageQuota: []byte("[]"),
+			GPUQuota:     []byte("[]"),
+		}
 	}
 
-	quotaMap := make(map[int]int)
-	for _, q := range existingQuotas {
-		quotaMap[q.ResourceConfigID] = q.Quota
+	// Parse storage classes from resource config
+	var storageClasses []struct {
+		Name      string `json:"name"`
+		LimitGi   int    `json:"limit_gi"`
+		IsDefault bool   `json:"is_default"`
 	}
+	json.Unmarshal([]byte(resourceConfig.StorageClasses), &storageClasses)
 
+	// Parse GPU types from resource config
 	var gpuTypes []struct {
+		Name           string `json:"name"`
 		ModelName      string `json:"model_name"`
 		ResourceName   string `json:"resource_name"`
 		NodeLabelKey   string `json:"node_label_key"`
 		NodeLabelValue string `json:"node_label_value"`
 		Limit          int    `json:"limit"`
+		IsDefault      bool   `json:"is_default"`
 	}
 	json.Unmarshal([]byte(resourceConfig.GPUTypes), &gpuTypes)
 
+	// Parse existing storage quota
+	var existingStorageQuota []models.StorageQuotaItem
+	if existingQuota.StorageQuota != nil {
+		json.Unmarshal(existingQuota.StorageQuota, &existingStorageQuota)
+	}
+	storageQuotaMap := make(map[string]int)
+	for _, sq := range existingStorageQuota {
+		storageQuotaMap[sq.Name] = sq.LimitGi
+	}
+
+	// Parse existing GPU quota
+	var existingGPUQuota []models.GPUQuotaItem
+	if existingQuota.GPUQuota != nil {
+		json.Unmarshal(existingQuota.GPUQuota, &existingGPUQuota)
+	}
+	gpuQuotaMap := make(map[string]int)
+	for _, gq := range existingGPUQuota {
+		gpuQuotaMap[gq.ModelName] = gq.Limit
+	}
+
+	// Build quota items for frontend
 	type QuotaItem struct {
 		ResourceConfigID int    `json:"resource_config_id"`
 		ResourceType     string `json:"resource_type"`
@@ -7344,18 +7906,38 @@ func handleGetTeamQuota(w http.ResponseWriter, r *http.Request, teamID uint) {
 	}
 
 	quotaItems := []QuotaItem{
-		{ResourceConfigID: 1, ResourceType: "cpu", ResourceName: "cpu", DisplayName: "CPU Cores", Quota: quotaMap[1], Unit: "cores"},
-		{ResourceConfigID: 2, ResourceType: "memory", ResourceName: "memory", DisplayName: "Memory", Quota: quotaMap[2], Unit: "Gi"},
-		{ResourceConfigID: 3, ResourceType: "storage", ResourceName: "storage", DisplayName: "Storage", Quota: quotaMap[3], Unit: "Gi"},
+		{ResourceConfigID: 1, ResourceType: "cpu", ResourceName: "cpu", DisplayName: "CPU Cores", Quota: existingQuota.CPUCores, Unit: "cores"},
+		{ResourceConfigID: 2, ResourceType: "memory", ResourceName: "memory", DisplayName: "Memory", Quota: existingQuota.MemoryGi, Unit: "Gi"},
 	}
 
+	// Add storage quotas from resource config
+	for i, sc := range storageClasses {
+		quota := storageQuotaMap[sc.Name]
+		if quota == 0 {
+			quota = sc.LimitGi // Use default
+		}
+		quotaItems = append(quotaItems, QuotaItem{
+			ResourceConfigID: 10 + i,
+			ResourceType:     "storage",
+			ResourceName:     sc.Name,
+			DisplayName:      sc.Name,
+			Quota:            quota,
+			Unit:             "Gi",
+		})
+	}
+
+	// Add GPU quotas from resource config
 	for i, gpu := range gpuTypes {
+		quota := gpuQuotaMap[gpu.ModelName]
+		if quota == 0 {
+			quota = gpu.Limit // Use default
+		}
 		quotaItems = append(quotaItems, QuotaItem{
 			ResourceConfigID: 100 + i,
 			ResourceType:     "gpu",
 			ResourceName:     gpu.ResourceName,
 			DisplayName:      gpu.ModelName,
-			Quota:            quotaMap[100+i],
+			Quota:            quota,
 			Unit:             "units",
 		})
 	}
@@ -7376,8 +7958,10 @@ func handleUpdateTeamQuota(w http.ResponseWriter, r *http.Request, teamID uint) 
 
 	var req struct {
 		Quotas []struct {
-			ResourceConfigID int `json:"resource_config_id"`
-			Quota            int `json:"quota"`
+			ResourceConfigID int    `json:"resource_config_id"`
+			ResourceType     string `json:"resource_type"`
+			ResourceName     string `json:"resource_name"`
+			Quota            int    `json:"quota"`
 		} `json:"quotas"`
 	}
 
@@ -7386,21 +7970,47 @@ func handleUpdateTeamQuota(w http.ResponseWriter, r *http.Request, teamID uint) 
 		return
 	}
 
-	quotas := make([]models.TeamQuota, len(req.Quotas))
-	for i, q := range req.Quotas {
-		quotas[i] = models.TeamQuota{
-			TeamID:           teamID,
-			ResourceConfigID: q.ResourceConfigID,
-			Quota:            q.Quota,
+	// Build the TeamQuota model
+	teamQuota := &models.TeamQuota{
+		TeamID: teamID,
+	}
+
+	var storageQuotas []models.StorageQuotaItem
+	var gpuQuotas []models.GPUQuotaItem
+
+	for _, q := range req.Quotas {
+		switch {
+		case q.ResourceConfigID == 1 || q.ResourceType == "cpu":
+			teamQuota.CPUCores = q.Quota
+		case q.ResourceConfigID == 2 || q.ResourceType == "memory":
+			teamQuota.MemoryGi = q.Quota
+		case q.ResourceType == "storage" || (q.ResourceConfigID >= 10 && q.ResourceConfigID < 100):
+			storageQuotas = append(storageQuotas, models.StorageQuotaItem{
+				Name:    q.ResourceName,
+				LimitGi: q.Quota,
+			})
+		case q.ResourceType == "gpu" || q.ResourceConfigID >= 100:
+			gpuQuotas = append(gpuQuotas, models.GPUQuotaItem{
+				Name:      q.ResourceName,
+				ModelName: q.ResourceName,
+				Limit:     q.Quota,
+			})
 		}
 	}
 
-	if err := teamQuotaRepo.UpsertBatch(teamID, quotas); err != nil {
+	// Convert to JSON
+	storageJSON, _ := json.Marshal(storageQuotas)
+	gpuJSON, _ := json.Marshal(gpuQuotas)
+	teamQuota.StorageQuota = storageJSON
+	teamQuota.GPUQuota = gpuJSON
+
+	if err := teamQuotaRepo.Upsert(teamQuota); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to update team quotas: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	if err := applyTeamResourceQuota(team, req.Quotas); err != nil {
+	// Apply ResourceQuota to Kubernetes namespace
+	if err := applyTeamResourceQuotaNew(team, teamQuota); err != nil {
 		log.Printf("Warning: Failed to apply ResourceQuota for team %s: %v", team.Name, err)
 	}
 
@@ -7433,6 +8043,73 @@ func applyTeamResourceQuota(team *models.Team, quotas []struct {
 			hard[corev1.ResourceLimitsMemory] = resource.MustParse(fmt.Sprintf("%dGi", q.Quota))
 		case 3: // Storage
 			hard[corev1.ResourceRequestsStorage] = resource.MustParse(fmt.Sprintf("%dGi", q.Quota))
+		}
+	}
+
+	if len(hard) == 0 {
+		return nil
+	}
+
+	rq := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "team-quota",
+			Namespace: team.Namespace,
+		},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: hard,
+		},
+	}
+
+	_, err := k8sClientset.CoreV1().ResourceQuotas(team.Namespace).Create(context.Background(), rq, metav1.CreateOptions{})
+	if err != nil && strings.Contains(err.Error(), "already exists") {
+		_, err = k8sClientset.CoreV1().ResourceQuotas(team.Namespace).Update(context.Background(), rq, metav1.UpdateOptions{})
+	}
+	return err
+}
+
+// applyTeamResourceQuotaNew applies the team quota to Kubernetes namespace using the new model
+func applyTeamResourceQuotaNew(team *models.Team, quota *models.TeamQuota) error {
+	if k8sClientset == nil {
+		return fmt.Errorf("kubernetes client not initialized")
+	}
+
+	hard := corev1.ResourceList{}
+
+	// CPU
+	if quota.CPUCores > 0 {
+		hard[corev1.ResourceRequestsCPU] = resource.MustParse(fmt.Sprintf("%d", quota.CPUCores))
+		hard[corev1.ResourceLimitsCPU] = resource.MustParse(fmt.Sprintf("%d", quota.CPUCores))
+	}
+
+	// Memory
+	if quota.MemoryGi > 0 {
+		hard[corev1.ResourceRequestsMemory] = resource.MustParse(fmt.Sprintf("%dGi", quota.MemoryGi))
+		hard[corev1.ResourceLimitsMemory] = resource.MustParse(fmt.Sprintf("%dGi", quota.MemoryGi))
+	}
+
+	// Storage - sum all storage quotas
+	var storageQuotas []models.StorageQuotaItem
+	if quota.StorageQuota != nil {
+		json.Unmarshal(quota.StorageQuota, &storageQuotas)
+	}
+	totalStorage := 0
+	for _, sq := range storageQuotas {
+		totalStorage += sq.LimitGi
+	}
+	if totalStorage > 0 {
+		hard[corev1.ResourceRequestsStorage] = resource.MustParse(fmt.Sprintf("%dGi", totalStorage))
+	}
+
+	// GPU - add each GPU type as extended resource
+	var gpuQuotas []models.GPUQuotaItem
+	if quota.GPUQuota != nil {
+		json.Unmarshal(quota.GPUQuota, &gpuQuotas)
+	}
+	for _, gq := range gpuQuotas {
+		if gq.Limit > 0 && gq.Name != "" {
+			// GPU resources are specified as requests (e.g., "requests.nvidia.com/gpu")
+			gpuResourceName := corev1.ResourceName(fmt.Sprintf("requests.%s", gq.Name))
+			hard[gpuResourceName] = resource.MustParse(fmt.Sprintf("%d", gq.Limit))
 		}
 	}
 
@@ -7508,9 +8185,84 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Warning: Failed to create namespace for team %s: %v", team.Name, err)
 	}
 
+	// Create default team quota from resource config
+	if err := createDefaultTeamQuota(team); err != nil {
+		log.Printf("Warning: Failed to create default quota for team %s: %v", team.Name, err)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(team)
+}
+
+// createDefaultTeamQuota creates a default team quota from resource config
+func createDefaultTeamQuota(team *models.Team) error {
+	// Get resource config for default values
+	resourceConfig, err := resourceConfigRepo.GetConfig()
+	if err != nil {
+		return fmt.Errorf("failed to get resource config: %v", err)
+	}
+
+	// Parse storage classes from resource config
+	var storageClasses []struct {
+		Name      string `json:"name"`
+		LimitGi   int    `json:"limit_gi"`
+		IsDefault bool   `json:"is_default"`
+	}
+	json.Unmarshal([]byte(resourceConfig.StorageClasses), &storageClasses)
+
+	// Parse GPU types from resource config
+	var gpuTypes []struct {
+		Name         string `json:"name"`
+		ModelName    string `json:"model_name"`
+		ResourceName string `json:"resource_name"`
+		Limit        int    `json:"limit"`
+	}
+	json.Unmarshal([]byte(resourceConfig.GPUTypes), &gpuTypes)
+
+	// Build storage quota from defaults
+	var storageQuotas []models.StorageQuotaItem
+	for _, sc := range storageClasses {
+		storageQuotas = append(storageQuotas, models.StorageQuotaItem{
+			Name:    sc.Name,
+			LimitGi: sc.LimitGi,
+		})
+	}
+
+	// Build GPU quota from defaults
+	var gpuQuotas []models.GPUQuotaItem
+	for _, gpu := range gpuTypes {
+		gpuQuotas = append(gpuQuotas, models.GPUQuotaItem{
+			Name:      gpu.ResourceName,
+			ModelName: gpu.ModelName,
+			Limit:     gpu.Limit,
+		})
+	}
+
+	// Marshal to JSON
+	storageJSON, _ := json.Marshal(storageQuotas)
+	gpuJSON, _ := json.Marshal(gpuQuotas)
+
+	// Create team quota with defaults
+	teamQuota := &models.TeamQuota{
+		TeamID:       team.ID,
+		CPUCores:     resourceConfig.DefaultCPUCores,
+		MemoryGi:     resourceConfig.DefaultMemoryGi,
+		StorageQuota: storageJSON,
+		GPUQuota:     gpuJSON,
+	}
+
+	if err := teamQuotaRepo.Upsert(teamQuota); err != nil {
+		return fmt.Errorf("failed to create team quota: %v", err)
+	}
+
+	// Apply ResourceQuota to Kubernetes namespace
+	if err := applyTeamResourceQuotaNew(team, teamQuota); err != nil {
+		return fmt.Errorf("failed to apply resource quota: %v", err)
+	}
+
+	log.Printf("Created default quota for team %s: CPU=%d, Memory=%dGi", team.Name, teamQuota.CPUCores, teamQuota.MemoryGi)
+	return nil
 }
 
 // createTeamNamespace creates a Kubernetes namespace for a team
@@ -7533,6 +8285,122 @@ func createTeamNamespace(team *models.Team) error {
 	if err != nil && !strings.Contains(err.Error(), "already exists") {
 		return err
 	}
+
+	// Ensure agent auth secret is copied
+	if err := copyAgentAuthSecretToNamespace(team.Namespace); err != nil {
+		log.Printf("WARNING: Failed to copy agent auth secret to team namespace: %v", err)
+	}
+	return nil
+}
+
+// initAdminTeam initializes the admin team on server startup
+// Creates the team in DB, K8s namespace, ResourceQuota, and copies agent auth secret
+func initAdminTeam() error {
+	if teamRepo == nil {
+		return fmt.Errorf("team repository not initialized")
+	}
+
+	// Check if admin team already exists
+	existingTeam, err := teamRepo.GetByName("admin")
+	if err == nil && existingTeam != nil {
+		log.Printf("✓ Admin team already exists (ID: %d, Namespace: %s)", existingTeam.ID, existingTeam.Namespace)
+
+		// Ensure namespace exists
+		if k8sClientset != nil {
+			if err := createTeamNamespace(existingTeam); err != nil {
+				log.Printf("WARNING: Failed to ensure admin team namespace: %v", err)
+			}
+			// Ensure agent auth secret is copied
+			if err := copyAgentAuthSecretToNamespace(existingTeam.Namespace); err != nil {
+				log.Printf("WARNING: Failed to copy agent auth secret to admin namespace: %v", err)
+			}
+		}
+		return nil
+	}
+
+	log.Println("Creating admin team...")
+
+	// Create admin team in DB
+	adminTeam := &models.Team{
+		Name:        "admin",
+		DisplayName: "Admin Team",
+		Namespace:   "kuberde-admin",
+		Status:      "active",
+	}
+
+	if err := teamRepo.Create(adminTeam); err != nil {
+		return fmt.Errorf("failed to create admin team in DB: %v", err)
+	}
+
+	log.Printf("✓ Created admin team in DB (ID: %d)", adminTeam.ID)
+
+	// Create K8s namespace
+	if k8sClientset != nil {
+		if err := createTeamNamespace(adminTeam); err != nil {
+			log.Printf("WARNING: Failed to create admin team namespace: %v", err)
+		} else {
+			log.Printf("✓ Created namespace %s", adminTeam.Namespace)
+		}
+
+		// Copy agent auth secret to namespace
+		if err := copyAgentAuthSecretToNamespace(adminTeam.Namespace); err != nil {
+			log.Printf("WARNING: Failed to copy agent auth secret: %v", err)
+		} else {
+			log.Printf("✓ Copied agent auth secret to %s", adminTeam.Namespace)
+		}
+	}
+
+	// Create default quota
+	if err := createDefaultTeamQuota(adminTeam); err != nil {
+		log.Printf("WARNING: Failed to create default quota for admin team: %v", err)
+	} else {
+		log.Printf("✓ Created default quota for admin team")
+	}
+
+	log.Println("✓ Admin team initialization complete")
+	return nil
+}
+
+// copyAgentAuthSecretToNamespace copies the agent auth secret from kuberde namespace to target namespace
+func copyAgentAuthSecretToNamespace(targetNamespace string) error {
+	if k8sClientset == nil {
+		return fmt.Errorf("kubernetes client not initialized")
+	}
+
+	ctx := context.Background()
+
+	// Get the source secret
+	sourceSecret, err := k8sClientset.CoreV1().Secrets(kuberdeNamespace).Get(ctx, agentAuthSecret, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get source secret: %v", err)
+	}
+
+	// Check if secret already exists in target namespace
+	_, err = k8sClientset.CoreV1().Secrets(targetNamespace).Get(ctx, agentAuthSecret, metav1.GetOptions{})
+	if err == nil {
+		// Secret already exists
+		return nil
+	}
+
+	// Create the secret in target namespace
+	newSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      agentAuthSecret,
+			Namespace: targetNamespace,
+			Labels: map[string]string{
+				"kuberde.io/component":   "agent-auth",
+				"kuberde.io/copied-from": kuberdeNamespace,
+			},
+		},
+		Type: sourceSecret.Type,
+		Data: sourceSecret.Data,
+	}
+
+	_, err = k8sClientset.CoreV1().Secrets(targetNamespace).Create(ctx, newSecret, metav1.CreateOptions{})
+	if err != nil && !strings.Contains(err.Error(), "already exists") {
+		return fmt.Errorf("failed to create secret in target namespace: %v", err)
+	}
+
 	return nil
 }
 
@@ -7550,6 +8418,11 @@ func main() {
 	}
 
 	initKubernetes()
+
+	// Initialize admin team (DB + K8s resources)
+	if err := initAdminTeam(); err != nil {
+		log.Printf("WARNING: Failed to initialize admin team: %v", err)
+	}
 
 	http.HandleFunc("/", routeHTTPRequest)
 

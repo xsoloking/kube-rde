@@ -187,12 +187,12 @@ const ResourceManagement: React.FC = () => {
         )}
 
         <div className="space-y-6">
-          {/* Default User Quotas Section - All Resources */}
+          {/* Default Team Quotas Section - All Resources */}
           <div className="bg-surface-dark border border-border-dark rounded-2xl p-6">
             <div className="flex items-center gap-3 mb-6 pb-4 border-b border-border-dark">
               <span className="material-symbols-outlined text-primary text-2xl">settings</span>
               <div>
-                <h2 className="text-xl font-bold text-white">Default User Quotas</h2>
+                <h2 className="text-xl font-bold text-white">Default Team Quotas</h2>
                 <p className="text-text-secondary text-sm mt-1">
                   Configure default resource limits for new users
                 </p>

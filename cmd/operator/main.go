@@ -675,7 +675,8 @@ func (c *Controller) reconcileDeployment(cr *unstructured.Unstructured) error {
 	if tokenURL == "" {
 		baseURL := os.Getenv("KEYCLOAK_URL")
 		if baseURL == "" {
-			baseURL = "http://keycloak:8080"
+			// Use FQDN for cross-namespace DNS resolution (agents may run in team namespaces)
+			baseURL = "http://keycloak.kuberde.svc.cluster.local:8080"
 		}
 		tokenURL = fmt.Sprintf("%s/realms/kuberde/protocol/openid-connect/token", baseURL)
 	}
@@ -724,6 +725,17 @@ func (c *Controller) reconcileDeployment(cr *unstructured.Unstructured) error {
 									},
 								},
 								{Name: "AUTH_TOKEN_URL", Value: tokenURL},
+							},
+							// Default resources for kuberde-agent sidecar (required when ResourceQuota is set)
+							Resources: corev1.ResourceRequirements{
+								Requests: corev1.ResourceList{
+									corev1.ResourceCPU:    resource.MustParse("50m"),
+									corev1.ResourceMemory: resource.MustParse("64Mi"),
+								},
+								Limits: corev1.ResourceList{
+									corev1.ResourceCPU:    resource.MustParse("200m"),
+									corev1.ResourceMemory: resource.MustParse("128Mi"),
+								},
 							},
 						},
 						// 2. User Workload

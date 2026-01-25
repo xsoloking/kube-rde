@@ -4,37 +4,53 @@ metadata:
   name: kuberde-server
   namespace: ${NAMESPACE}
 ---
+# ClusterRole for multi-tenant team support
+# Server needs to create RDEAgents and PVCs in team namespaces (kuberde-{team-name})
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
-  name: kuberde-server
-  namespace: ${NAMESPACE}
+  name: kuberde-server-role
 rules:
-- apiGroups: ["apps"]
-  resources: ["deployments"]
-  verbs: ["get", "list", "update", "patch"]
+# 1. Manage RDEAgents across all team namespaces
+- apiGroups: ["kuberde.io"]
+  resources: ["rdeagents"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# 2. Manage PVCs in team namespaces for workspace storage
+- apiGroups: [""]
+  resources: ["persistentvolumeclaims"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# 3. Create and manage team namespaces
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# 4. Copy secrets to team namespaces (agent auth)
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+# 5. Manage ResourceQuotas for team quotas
+- apiGroups: [""]
+  resources: ["resourcequotas"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# 6. Monitor pods and events
 - apiGroups: [""]
   resources: ["pods", "pods/log"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  verbs: ["get", "list", "watch"]
 - apiGroups: [""]
   resources: ["events"]
   verbs: ["list", "get"]
-- apiGroups: ["kuberde.io"]
-  resources: ["rdeagents"]
-  verbs: ["get", "list", "create", "update", "patch", "delete"]
-- apiGroups: [""]
-  resources: ["persistentvolumeclaims"]
-  verbs: ["get", "list", "create", "delete"]
+# 7. Manage deployments (for agent status)
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "update", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
+kind: ClusterRoleBinding
 metadata:
-  name: kuberde-server
-  namespace: ${NAMESPACE}
+  name: kuberde-server-binding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: kuberde-server
+  kind: ClusterRole
+  name: kuberde-server-role
 subjects:
 - kind: ServiceAccount
   name: kuberde-server
@@ -81,7 +97,7 @@ spec:
           failureThreshold: 2
         env:
         - name: KEYCLOAK_URL
-          value: "http://keycloak:8080"
+          value: "http://keycloak.kuberde.svc.cluster.local:8080" # FQDN for cross-namespace DNS resolution
         - name: KEYCLOAK_PUBLIC_URL
           value: ${KC_FRONTEND_URL}
         - name: KUBERDE_PUBLIC_URL

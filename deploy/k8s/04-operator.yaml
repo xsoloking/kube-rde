@@ -91,9 +91,9 @@ spec:
         # Environment variables
         env:
         - name: KUBERDE_SERVER_API
-          value: "http://kuberde-server:8080" # Internal Service URL
+          value: "http://kuberde-server.kuberde.svc.cluster.local:8080" # Internal Service URL (FQDN for cross-namespace)
         - name: KEYCLOAK_URL
-          value: "http://keycloak:8080"
+          value: "http://keycloak.kuberde.svc.cluster.local:8080" # FQDN for cross-namespace DNS resolution
         - name: KUBERDE_AGENT_IMAGE
           value: ${KUBERDE_AGENT_IMAGE}
         - name: LOG_LEVEL

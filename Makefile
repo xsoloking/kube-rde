@@ -212,23 +212,31 @@ deploy-keycloak:
 	@echo "$(BLUE)Deploying Keycloak...$(NC)"
 	@envsubst < $(K8S_DIR)/02-keycloak-admin-secret.yaml | $(KUBECTL) apply -f -
 	@envsubst < $(K8S_DIR)/02-keycloak-realm-secret.yaml | $(KUBECTL) apply -f -
+	@# Delete existing deployment to handle immutable selector changes
+# 	@$(KUBECTL) delete deployment keycloak -n $(NAMESPACE) --ignore-not-found=true 2>/dev/null || true
 	@envsubst < $(K8S_DIR)/02-keycloak.yaml | $(KUBECTL) apply -f -
 	@echo "$(GREEN)✓ Keycloak deployed$(NC)"
 
 deploy-server:
 	@echo "$(BLUE)Deploying server...$(NC)"
 	@envsubst < $(K8S_DIR)/03-agent.yaml | $(KUBECTL) apply -f -
+	@# Delete existing deployment to handle immutable selector changes
+	@$(KUBECTL) delete deployment kuberde-server -n $(NAMESPACE) --ignore-not-found=true 2>/dev/null || true
 	@envsubst < $(K8S_DIR)/03-server.yaml | $(KUBECTL) apply -f -
 	@echo "$(GREEN)✓ Server deployed$(NC)"
 
 
 deploy-operator:
 	@echo "$(BLUE)Deploying operator...$(NC)"
+	@# Delete existing deployment to handle immutable selector changes
+	@$(KUBECTL) delete deployment kuberde-operator -n $(NAMESPACE) --ignore-not-found=true 2>/dev/null || true
 	@envsubst < $(K8S_DIR)/04-operator.yaml | $(KUBECTL) apply -f -
 	@echo "$(GREEN)✓ Operator deployed$(NC)"
 
 deploy-web:
 	@echo "$(BLUE)Deploying Web UI...$(NC)"
+	@# Delete existing deployment to handle immutable selector changes
+	@$(KUBECTL) delete deployment kuberde-web -n $(NAMESPACE) --ignore-not-found=true 2>/dev/null || true
 	@envsubst < $(K8S_DIR)/02-web.yaml | $(KUBECTL) apply -f -
 	@echo "$(GREEN)✓ Web UI deployed$(NC)"
 
@@ -239,6 +247,8 @@ deploy-ingress:
 
 deploy-postgresql:
 	@echo "$(BLUE)Deploying PostgreSQL...$(NC)"
+	@# Delete existing statefulset to handle immutable selector changes
+	@$(KUBECTL) delete statefulset postgresql -n $(NAMESPACE) --ignore-not-found=true 2>/dev/null || true
 	@envsubst < $(K8S_DIR)/06-postgresql.yaml | $(KUBECTL) apply -f -
 	@echo "$(GREEN)✓ PostgreSQL deployed$(NC)"
 

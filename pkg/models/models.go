@@ -182,16 +182,30 @@ func (Team) TableName() string {
 	return "teams"
 }
 
-// TeamQuota represents a resource quota for a team
+// TeamQuota represents a resource quota for a team (matches database schema)
 type TeamQuota struct {
-	ID               uint           `gorm:"primaryKey" json:"id"`
-	TeamID           uint           `gorm:"index;not null" json:"team_id"`
-	ResourceConfigID int            `gorm:"not null" json:"resource_config_id"`
-	Quota            int            `gorm:"not null;default:0" json:"quota"`
-	Team             Team           `gorm:"foreignKey:TeamID" json:"team,omitempty"`
-	ResourceConfig   ResourceConfig `gorm:"foreignKey:ResourceConfigID" json:"resource_config,omitempty"`
-	CreatedAt        time.Time      `json:"created_at"`
-	UpdatedAt        time.Time      `json:"updated_at"`
+	ID           uint            `gorm:"primaryKey" json:"id"`
+	TeamID       uint            `gorm:"uniqueIndex;not null" json:"team_id"`
+	CPUCores     int             `gorm:"not null;default:0" json:"cpu_cores"`
+	MemoryGi     int             `gorm:"not null;default:0" json:"memory_gi"`
+	StorageQuota json.RawMessage `gorm:"type:jsonb;default:'[]'" json:"storage_quota"`
+	GPUQuota     json.RawMessage `gorm:"type:jsonb;default:'[]'" json:"gpu_quota"`
+	Team         Team            `gorm:"foreignKey:TeamID" json:"team,omitempty"`
+	CreatedAt    time.Time       `json:"created_at"`
+	UpdatedAt    time.Time       `json:"updated_at"`
+}
+
+// StorageQuotaItem represents a storage quota entry
+type StorageQuotaItem struct {
+	Name    string `json:"name"`
+	LimitGi int    `json:"limit_gi"`
+}
+
+// GPUQuotaItem represents a GPU quota entry
+type GPUQuotaItem struct {
+	Name      string `json:"name"`
+	ModelName string `json:"model_name"`
+	Limit     int    `json:"limit"`
 }
 
 // TableName specifies the table name for TeamQuota

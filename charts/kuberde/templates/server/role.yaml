@@ -1,27 +1,44 @@
 {{- if .Values.server.enabled }}
 {{- if .Values.server.rbac.create }}
+# ClusterRole for multi-tenant team support
+# Server needs to create RDEAgents and PVCs in team namespaces (kuberde-{team-name})
 apiVersion: {{ include "rbac.apiVersion" . }}
-kind: Role
+kind: ClusterRole
 metadata:
-  name: {{ include "kuberde.fullname" . }}-server
-  namespace: {{ .Release.Namespace }}
+  name: {{ include "kuberde.fullname" . }}-server-role
   labels:
     {{- include "kuberde.server.labels" . | nindent 4 }}
 rules:
-- apiGroups: ["apps"]
-  resources: ["deployments"]
-  verbs: ["get", "list", "update", "patch"]
+# 1. Manage RDEAgents across all team namespaces
+- apiGroups: ["kuberde.io"]
+  resources: ["rdeagents"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# 2. Manage PVCs in team namespaces for workspace storage
+- apiGroups: [""]
+  resources: ["persistentvolumeclaims"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# 3. Create and manage team namespaces
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# 4. Copy secrets to team namespaces (agent auth)
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+# 5. Manage ResourceQuotas for team quotas
+- apiGroups: [""]
+  resources: ["resourcequotas"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# 6. Monitor pods and events
 - apiGroups: [""]
   resources: ["pods", "pods/log"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  verbs: ["get", "list", "watch"]
 - apiGroups: [""]
   resources: ["events"]
   verbs: ["list", "get"]
-- apiGroups: ["kuberde.io"]
-  resources: ["rdeagents"]
-  verbs: ["get", "list", "create", "update", "patch", "delete"]
-- apiGroups: [""]
-  resources: ["persistentvolumeclaims"]
-  verbs: ["get", "list", "create", "delete"]
+# 7. Manage deployments (for agent status)
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "update", "patch"]
 {{- end }}
 {{- end }}

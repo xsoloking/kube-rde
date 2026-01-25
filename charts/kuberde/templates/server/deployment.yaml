@@ -53,7 +53,7 @@ spec:
         {{- end }}
         env:
         - name: KEYCLOAK_URL
-          value: "http://{{ include "kuberde.fullname" . }}-keycloak:{{ .Values.keycloak.service.port }}"
+          value: "http://{{ include "kuberde.fullname" . }}-keycloak.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.keycloak.service.port }}"
         - name: KEYCLOAK_PUBLIC_URL
           value: "{{ .Values.global.protocol }}://{{ .Values.global.keycloakDomain }}"
         - name: KUBERDE_PUBLIC_URL
@@ -63,7 +63,7 @@ spec:
         - name: KUBERDE_AGENT_IMAGE
           value: {{ include "kuberde.image" (dict "Values" .Values "componentImage" "kuberde-agent") }}
         - name: KUBERDE_AGENT_SERVER_URL
-          value: "{{ .Values.server.env.KUBERDE_AGENT_SERVER_URL | default "ws://kuberde-server:8080/ws" }}"
+          value: "{{ .Values.server.env.KUBERDE_AGENT_SERVER_URL | default (printf "ws://%s-server.%s.svc.cluster.local:%d/ws" (include "kuberde.fullname" .) .Release.Namespace (.Values.server.service.port | int)) }}"
         - name: KUBERDE_AGENT_AUTH_SECRET
           value: "{{ .Values.server.env.KUBERDE_AGENT_AUTH_SECRET | default "keycloak-agent-client-secret" }}"
         - name: KUBERDE_NAMESPACE

@@ -57,6 +57,19 @@ func (r *UserRepository) Update(user *models.User) error {
 	return r.db.Save(user).Error
 }
 
+// Upsert creates or updates a user
+func (r *UserRepository) Upsert(user *models.User) error {
+	existing, _ := r.FindByID(user.ID)
+	if existing == nil {
+		return r.Create(user)
+	}
+	// Update only specific fields
+	return r.db.Model(existing).Updates(map[string]interface{}{
+		"team_id":    user.TeamID,
+		"updated_at": user.UpdatedAt,
+	}).Error
+}
+
 // Delete deletes a user
 func (r *UserRepository) Delete(id string) error {
 	return r.db.Delete(&models.User{}, "id = ?", id).Error
@@ -156,6 +169,15 @@ func (r *WorkspaceRepository) Update(workspace *models.Workspace) error {
 	return r.db.Save(workspace).Error
 }
 
+// FindByTeamID finds all workspaces belonging to a team
+func (r *WorkspaceRepository) FindByTeamID(teamID uint) ([]models.Workspace, error) {
+	var workspaces []models.Workspace
+	if err := r.db.Preload("Owner").Preload("Services").Where("team_id = ?", teamID).Find(&workspaces).Error; err != nil {
+		return nil, err
+	}
+	return workspaces, nil
+}
+
 // Delete deletes a workspace (cascades to services)
 func (r *WorkspaceRepository) Delete(id string) error {
 	return r.db.Delete(&models.Workspace{}, "id = ?", id).Error
@@ -251,6 +273,15 @@ func (r *ServiceRepository) CountActive() (int64, error) {
 func (r *ServiceRepository) GetAll() ([]models.Service, error) {
 	var services []models.Service
 	if err := r.db.Find(&services).Error; err != nil {
+		return nil, err
+	}
+	return services, nil
+}
+
+// FindByAgentID finds services by AgentID
+func (r *ServiceRepository) FindByAgentID(agentID string) ([]*models.Service, error) {
+	var services []*models.Service
+	if err := r.db.Where("agent_id = ?", agentID).Find(&services).Error; err != nil {
 		return nil, err
 	}
 	return services, nil

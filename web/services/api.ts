@@ -33,15 +33,26 @@ class ApiClient {
         throw new Error('Unauthorized');
       }
 
-      // Handle 403 Forbidden
-      if (response.status === 403) {
-        throw new Error('Forbidden: Insufficient permissions');
-      }
-
       if (!response.ok) {
-        const errorText = await response.text();
+        let errorMessage = `HTTP ${response.status}`;
+        const contentType = response.headers.get('content-type');
+
+        if (contentType && contentType.includes('application/json')) {
+          try {
+            const errorJson = await response.json();
+            errorMessage = errorJson.message || errorJson.error || errorMessage;
+          } catch {
+            // Failed to parse JSON, try text
+            const errorText = await response.text();
+            errorMessage = errorText || errorMessage;
+          }
+        } else {
+          const errorText = await response.text();
+          errorMessage = errorText || errorMessage;
+        }
+
         const error: ApiError = {
-          message: errorText || `HTTP ${response.status}`,
+          message: errorMessage,
           status: response.status,
         };
         throw error;
@@ -516,6 +527,16 @@ export interface TeamQuotaWithUsage extends TeamQuota {
   resource_name?: string;
 }
 
+// Server response format for team quota (different from TeamQuota model)
+export interface TeamQuotaItem {
+  resource_config_id: number;
+  resource_type: string;
+  resource_name: string;
+  display_name: string;
+  quota: number;
+  unit: string;
+}
+
 export interface CreateTeamRequest {
   name: string;
   display_name: string;
@@ -529,19 +550,29 @@ export interface UpdateTeamRequest {
 export interface UpdateTeamQuotaRequest {
   quotas: {
     resource_config_id: number;
+    resource_type?: string;
+    resource_name?: string;
     quota: number;
   }[];
 }
 
 // Teams API (admin only)
 export const teamsApi = {
-  list: () => api.get<Team[]>('/api/admin/teams'),
-  get: (id: number) => api.get<Team>(`/api/admin/teams/${id}`),
+  list: () =>
+    api.get<{ teams: Team[] }>('/api/admin/teams').then((res) => res.teams),
+  get: (id: number) =>
+    api.get<{ team: Team; member_count: number }>(`/api/admin/teams/${id}`).then((res) => res.team),
   create: (team: CreateTeamRequest) => api.post<Team>('/api/admin/teams', team),
   update: (id: number, team: UpdateTeamRequest) => api.put<Team>(`/api/admin/teams/${id}`, team),
   delete: (id: number) => api.delete(`/api/admin/teams/${id}`),
-  getMembers: (id: number) => api.get<User[]>(`/api/admin/teams/${id}/members`),
-  getQuota: (id: number) => api.get<TeamQuotaWithUsage[]>(`/api/admin/teams/${id}/quota`),
+  getMembers: (id: number) =>
+    api.get<{ members: User[] }>(`/api/admin/teams/${id}/members`).then((res) => res.members),
+  addMember: (teamId: number, userId: string) =>
+    api.post(`/api/admin/teams/${teamId}/members`, { user_id: userId }),
+  removeMember: (teamId: number, userId: string) =>
+    api.delete(`/api/admin/teams/${teamId}/members/${userId}`),
+  getQuota: (id: number) =>
+    api.get<{ team: Team; quotas: TeamQuotaItem[] }>(`/api/teams/${id}/quota`).then((res) => res.quotas),
   updateQuota: (id: number, request: UpdateTeamQuotaRequest) =>
-    api.put<TeamQuotaWithUsage[]>(`/api/admin/teams/${id}/quota`, request),
+    api.put<{ message: string }>(`/api/admin/teams/${id}/quota`, request),
 };

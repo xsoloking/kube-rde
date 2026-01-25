@@ -1,18 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import {
   usersApi,
-  userQuotaApi,
-  resourceConfigApi,
   sshKeysApi,
   teamsApi,
-  UserQuota,
   User as ApiUser,
-  ResourceConfig,
-  StorageClassConfig,
-  GPUTypeConfig,
   SSHKey,
   Team,
+  TeamQuotaItem,
 } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -20,11 +15,10 @@ const UserEdit: React.FC = () => {
   const { id } = useParams();
   const { user: currentUser } = useAuth();
   const [user, setUser] = useState<ApiUser | null>(null);
-  const [quota, setQuota] = useState<UserQuota | null>(null);
-  const [resourceConfig, setResourceConfig] = useState<ResourceConfig | null>(null);
   const [sshKeys, setSSHKeys] = useState<SSHKey[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null);
+  const [teamQuotas, setTeamQuotas] = useState<TeamQuotaItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +29,6 @@ const UserEdit: React.FC = () => {
   // Check permissions
   const isAdmin = currentUser?.roles?.includes('admin') || false;
   const isOwnProfile = currentUser?.id === id;
-  const canEditQuota = isAdmin;
   const canEditSSHKeys = isOwnProfile || isAdmin;
 
   useEffect(() => {
@@ -67,40 +60,33 @@ const UserEdit: React.FC = () => {
       }
 
       // Load remaining data
-      // Only admin users need resource config (for editing quotas) and teams
-      const dataPromises: Promise<unknown>[] = [userQuotaApi.get(id), sshKeysApi.list(id)];
+      const dataPromises: Promise<unknown>[] = [sshKeysApi.list(id)];
 
       if (isAdminUser) {
-        dataPromises.push(resourceConfigApi.get());
         dataPromises.push(teamsApi.list());
       }
 
       const results = await Promise.all(dataPromises);
-      const quotaData = results[0] as UserQuota;
-      const keysData = results[1] as SSHKey[];
-      const configData = isAdminUser ? (results[2] as ResourceConfig) : null;
-      const teamsData = isAdminUser ? (results[3] as Team[]) : [];
+      const keysData = results[0] as SSHKey[];
+      const teamsData = isAdminUser ? (results[1] as Team[]) : [];
 
       setSSHKeys(keysData || []);
       setTeams(teamsData || []);
 
       // Set selected team from user data
-      setSelectedTeamId((userData as ApiUser).team_id || null);
+      const userTeamId = (userData as ApiUser).team_id || null;
+      setSelectedTeamId(userTeamId);
 
-      // Parse resource config if available (admin only)
-      if (configData) {
-        // Parse JSONB strings if needed
-        if (typeof configData.storage_classes === 'string') {
-          configData.storage_classes = JSON.parse(configData.storage_classes);
+      // Load team quotas if user belongs to a team
+      if (userTeamId) {
+        try {
+          const teamQuotaData = await teamsApi.getQuota(userTeamId);
+          setTeamQuotas(teamQuotaData || []);
+        } catch (err) {
+          console.error('Failed to load team quotas:', err);
+          setTeamQuotas([]);
         }
-        if (typeof configData.gpu_types === 'string') {
-          configData.gpu_types = JSON.parse(configData.gpu_types);
-        }
-        setResourceConfig(configData);
       }
-
-      // Quota maps are already objects from the API
-      setQuota(quotaData);
     } catch (err) {
       setError('Failed to load user data');
       console.error('Failed to load user data:', err);
@@ -120,141 +106,25 @@ const UserEdit: React.FC = () => {
       if (user) {
         setUser({ ...user, team_id: teamId || undefined });
       }
+
+      // Load team quotas if new team selected
+      if (teamId) {
+        try {
+          const teamQuotaData = await teamsApi.getQuota(teamId);
+          setTeamQuotas(teamQuotaData || []);
+        } catch (err) {
+          console.error('Failed to load team quotas:', err);
+          setTeamQuotas([]);
+        }
+      } else {
+        setTeamQuotas([]);
+      }
     } catch (err) {
       console.error('Failed to update team:', err);
       alert('Failed to update team assignment');
     } finally {
       setSaving(false);
     }
-  };
-
-  const handleSyncQuotas = async () => {
-    if (!quota) return;
-
-    try {
-      // Ensure we have the latest config
-      let config = resourceConfig;
-      if (!config) {
-        config = await resourceConfigApi.get();
-        // Parse if needed (though API client usually handles this)
-        if (typeof config.storage_classes === 'string') {
-          config.storage_classes = JSON.parse(config.storage_classes);
-        }
-        if (typeof config.gpu_types === 'string') {
-          config.gpu_types = JSON.parse(config.gpu_types);
-        }
-        setResourceConfig(config);
-      }
-
-      if (!config) return;
-
-      const newQuota = { ...quota };
-      let added = 0;
-
-      // Sync Storage
-      const currentStorageNames = new Set(newQuota.storage_quota?.map((i) => i.name) || []);
-      const storageClasses = Array.isArray(config.storage_classes) ? config.storage_classes : [];
-
-      const newStorageItems = [...(newQuota.storage_quota || [])];
-      storageClasses.forEach((sc: StorageClassConfig) => {
-        if (!currentStorageNames.has(sc.name)) {
-          newStorageItems.push({ name: sc.name, limit_gi: sc.limit_gi });
-          added++;
-        }
-      });
-      newQuota.storage_quota = newStorageItems;
-
-      // Sync GPU
-      const currentGpuModels = new Set(newQuota.gpu_quota?.map((i) => i.model_name) || []);
-      const gpuTypes = Array.isArray(config.gpu_types) ? config.gpu_types : [];
-
-      const newGpuItems = [...(newQuota.gpu_quota || [])];
-      gpuTypes.forEach((gpu: GPUTypeConfig) => {
-        if (!currentGpuModels.has(gpu.model_name)) {
-          newGpuItems.push({
-            name: gpu.model_name,
-            model_name: gpu.model_name,
-            limit: gpu.limit,
-          });
-          added++;
-        }
-      });
-      newQuota.gpu_quota = newGpuItems;
-
-      setQuota(newQuota);
-      if (added > 0) {
-        alert(`Synced ${added} new resource types. Click "Save Changes" to persist.`);
-      } else {
-        alert('All available resource types are already present.');
-      }
-    } catch (err) {
-      console.error('Sync failed:', err);
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      alert('Failed to sync quotas: ' + message);
-    }
-  };
-
-  const removeStorageItem = (name: string) => {
-    if (!quota) return;
-    if (!confirm(`Remove storage quota for "${name}"?`)) return;
-    setQuota({
-      ...quota,
-      storage_quota: quota.storage_quota?.filter((item) => item.name !== name) || [],
-    });
-  };
-
-  const removeGpuItem = (modelName: string) => {
-    if (!quota) return;
-    if (!confirm(`Remove GPU quota for "${modelName}"?`)) return;
-    setQuota({
-      ...quota,
-      gpu_quota: quota.gpu_quota?.filter((item) => item.model_name !== modelName) || [],
-    });
-  };
-
-  const handleSaveQuota = async () => {
-    if (!id || !quota) return;
-
-    try {
-      setSaving(true);
-      await userQuotaApi.update(id, {
-        cpu_cores: quota.cpu_cores,
-        memory_gi: quota.memory_gi,
-        storage_quota: quota.storage_quota,
-        gpu_quota: quota.gpu_quota,
-      } as UserQuota);
-      alert('Quota updated successfully');
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      alert('Failed to update quota: ' + message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const updateStorageClassLimit = (className: string, limit: number) => {
-    if (!quota) return;
-    const newItems = [...(quota.storage_quota || [])];
-    const index = newItems.findIndex((item) => item.name === className);
-    if (index >= 0) {
-      newItems[index] = { ...newItems[index], limit_gi: limit };
-    } else {
-      newItems.push({ name: className, limit_gi: limit });
-    }
-    setQuota({ ...quota, storage_quota: newItems });
-  };
-
-  const updateGPUTypeLimit = (gpuType: string, modelName: string, limit: number) => {
-    if (!quota) return;
-    const newItems = [...(quota.gpu_quota || [])];
-    // Match by model_name as primary key for user selection
-    const index = newItems.findIndex((item) => item.model_name === modelName);
-    if (index >= 0) {
-      newItems[index] = { ...newItems[index], limit: limit };
-    } else {
-      newItems.push({ name: gpuType, model_name: modelName, limit: limit });
-    }
-    setQuota({ ...quota, gpu_quota: newItems });
   };
 
   const handleAddSSHKey = async () => {
@@ -582,33 +452,35 @@ Type "DELETE" to confirm:`;
               <section className="bg-surface-dark rounded-2xl border border-border-dark overflow-hidden h-full shadow-xl">
                 <div className="px-6 py-5 border-b border-border-dark flex flex-wrap justify-between items-center gap-4 bg-background-dark/30">
                   <div>
-                    <h2 className="text-xl font-bold text-white">Resource Quotas</h2>
+                    <h2 className="text-xl font-bold text-white">
+                      Team Resource Quotas
+                    </h2>
                     <p className="text-text-secondary text-sm mt-1">
-                      {canEditQuota
-                        ? 'Define the maximum resources this user can consume across all workspaces.'
-                        : 'View your resource quotas. Contact an administrator to request changes.'}
+                      {selectedTeamId ? (
+                        <>
+                          Resource quotas are managed at team level.{' '}
+                          {isAdmin && (
+                            <Link
+                              to={`/teams/${selectedTeamId}/quota`}
+                              className="text-primary hover:underline"
+                            >
+                              Edit team quotas →
+                            </Link>
+                          )}
+                        </>
+                      ) : (
+                        'You are not assigned to any team. Contact an administrator to join a team.'
+                      )}
                     </p>
                   </div>
-                  {canEditQuota && (
-                    <div className="flex items-center gap-3">
-                      <button
-                        onClick={handleSyncQuotas}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded-lg transition-colors"
-                        title="Sync resource types from global config"
-                      >
-                        <span className="material-symbols-outlined text-[18px]">sync</span>
-                        <span className="text-[10px] font-bold uppercase tracking-widest">
-                          Sync
-                        </span>
-                      </button>
-                      <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-                        <span className="material-symbols-outlined text-blue-400 text-[18px]">
-                          info
-                        </span>
-                        <span className="text-blue-400 text-[10px] font-bold uppercase tracking-widest">
-                          Changes apply immediately
-                        </span>
-                      </div>
+                  {selectedTeamId && (
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-primary/10 border border-primary/20 rounded-lg">
+                      <span className="material-symbols-outlined text-primary text-[18px]">
+                        groups
+                      </span>
+                      <span className="text-primary text-[10px] font-bold uppercase tracking-widest">
+                        Team Managed
+                      </span>
                     </div>
                   )}
                 </div>
@@ -618,197 +490,130 @@ Type "DELETE" to confirm:`;
                       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
                       <p className="text-text-secondary mt-4">Loading quotas...</p>
                     </div>
-                  ) : quota ? (
+                  ) : selectedTeamId && teamQuotas.length > 0 ? (
+                    /* Team Quotas Display (Read-Only) */
                     <>
-                      {/* CPU & Memory */}
-                      <div className="grid grid-cols-2 gap-6">
-                        <div className="group">
-                          <div className="flex items-center gap-2 mb-3">
+                      {/* Compute Resources */}
+                      {teamQuotas.filter((q) => q.resource_type === 'cpu' || q.resource_type === 'memory').length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-2 mb-4">
                             <span className="material-symbols-outlined text-text-secondary text-[20px]">
                               memory
                             </span>
-                            <label className="text-white font-bold text-sm">CPU Cores</label>
+                            <label className="text-white font-bold text-base">Compute Resources</label>
                           </div>
-                          <input
-                            className={`w-full bg-background-dark border border-border-dark rounded-lg px-4 py-2.5 text-white font-mono font-bold outline-none ${
-                              canEditQuota
-                                ? 'focus:border-primary focus:ring-1 focus:ring-primary'
-                                : 'opacity-60 cursor-not-allowed'
-                            }`}
-                            min="0"
-                            type="number"
-                            value={quota.cpu_cores}
-                            onChange={(e) =>
-                              setQuota({ ...quota, cpu_cores: parseInt(e.target.value) || 0 })
-                            }
-                            disabled={!canEditQuota}
-                          />
+                          <div className="grid grid-cols-2 gap-4">
+                            {teamQuotas
+                              .filter((q) => q.resource_type === 'cpu' || q.resource_type === 'memory')
+                              .map((q) => (
+                                <div
+                                  key={q.resource_config_id}
+                                  className="bg-background-dark border border-border-dark rounded-lg p-4"
+                                >
+                                  <p className="text-text-secondary text-xs font-bold uppercase tracking-wider mb-1">
+                                    {q.display_name}
+                                  </p>
+                                  <p className="text-2xl font-bold">
+                                    {q.quota} <span className="text-sm text-text-secondary font-normal">{q.unit}</span>
+                                  </p>
+                                </div>
+                              ))}
+                          </div>
                         </div>
+                      )}
 
-                        <div className="group">
-                          <div className="flex items-center gap-2 mb-3">
+                      {/* Storage */}
+                      {teamQuotas.filter((q) => q.resource_type === 'storage').length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-2 mb-4">
                             <span className="material-symbols-outlined text-text-secondary text-[20px]">
-                              storage
+                              hard_drive
                             </span>
-                            <label className="text-white font-bold text-sm">Memory (Gi)</label>
+                            <label className="text-white font-bold text-base">Storage</label>
                           </div>
-                          <input
-                            className={`w-full bg-background-dark border border-border-dark rounded-lg px-4 py-2.5 text-white font-mono font-bold outline-none ${
-                              canEditQuota
-                                ? 'focus:border-primary focus:ring-1 focus:ring-primary'
-                                : 'opacity-60 cursor-not-allowed'
-                            }`}
-                            min="0"
-                            type="number"
-                            value={quota.memory_gi}
-                            onChange={(e) =>
-                              setQuota({ ...quota, memory_gi: parseInt(e.target.value) || 0 })
-                            }
-                            disabled={!canEditQuota}
-                          />
-                        </div>
-                      </div>
-
-                      {/* Storage Classes */}
-                      <div>
-                        <div className="flex items-center gap-2 mb-4">
-                          <span className="material-symbols-outlined text-text-secondary text-[20px]">
-                            hard_drive
-                          </span>
-                          <label className="text-white font-bold text-base">Storage Quotas</label>
-                        </div>
-                        <div className="bg-background-dark border border-border-dark rounded-lg p-4">
-                          {quota.storage_quota && quota.storage_quota.length > 0 ? (
+                          <div className="bg-background-dark border border-border-dark rounded-lg p-4">
                             <div className="space-y-3">
-                              {quota.storage_quota.map((item, index) => (
-                                <div
-                                  key={index}
-                                  className="flex items-center justify-between group"
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-text-secondary text-sm font-mono">
-                                      {item.name}
+                              {teamQuotas
+                                .filter((q) => q.resource_type === 'storage')
+                                .map((q) => (
+                                  <div
+                                    key={q.resource_config_id}
+                                    className="flex items-center justify-between"
+                                  >
+                                    <span className="text-text-secondary text-sm">
+                                      {q.display_name}
+                                    </span>
+                                    <span className="text-white font-bold">
+                                      {q.quota} {q.unit}
                                     </span>
                                   </div>
-                                  <div className="flex items-center gap-3">
-                                    <div className="flex items-center gap-2">
-                                      <input
-                                        type="number"
-                                        min="0"
-                                        value={item.limit_gi}
-                                        onChange={(e) =>
-                                          updateStorageClassLimit(
-                                            item.name,
-                                            parseInt(e.target.value) || 0,
-                                          )
-                                        }
-                                        className={`w-24 px-3 py-1.5 bg-surface-dark border border-border-dark rounded-lg text-white text-sm font-mono font-bold focus:outline-none ${
-                                          canEditQuota
-                                            ? 'focus:border-primary'
-                                            : 'opacity-60 cursor-not-allowed'
-                                        }`}
-                                        disabled={!canEditQuota}
-                                      />
-                                      <span className="text-text-secondary text-xs font-bold">
-                                        Gi
-                                      </span>
-                                    </div>
-                                    {canEditQuota && (
-                                      <button
-                                        onClick={() => removeStorageItem(item.name)}
-                                        className="text-text-secondary hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
-                                        title="Remove quota"
-                                      >
-                                        <span className="material-symbols-outlined text-[18px]">
-                                          delete
-                                        </span>
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
+                                ))}
                             </div>
-                          ) : (
-                            <div className="text-text-secondary text-sm italic">
-                              No storage quotas configured.
-                              {canEditQuota && " Click 'Sync Types' to add defaults."}
-                            </div>
-                          )}
+                          </div>
                         </div>
-                      </div>
+                      )}
 
-                      {/* GPU Types */}
-                      <div>
-                        <div className="flex items-center gap-2 mb-4">
-                          <span className="material-symbols-outlined text-text-secondary text-[20px]">
-                            videogame_asset
-                          </span>
-                          <label className="text-white font-bold text-base">GPU Quotas</label>
-                        </div>
-                        <div className="bg-background-dark border border-border-dark rounded-lg p-4">
-                          {quota.gpu_quota && quota.gpu_quota.length > 0 ? (
+                      {/* GPU */}
+                      {teamQuotas.filter((q) => q.resource_type === 'gpu').length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-2 mb-4">
+                            <span className="material-symbols-outlined text-text-secondary text-[20px]">
+                              videogame_asset
+                            </span>
+                            <label className="text-white font-bold text-base">GPU Resources</label>
+                          </div>
+                          <div className="bg-background-dark border border-border-dark rounded-lg p-4">
                             <div className="space-y-3">
-                              {quota.gpu_quota.map((item, index) => (
-                                <div
-                                  key={index}
-                                  className="flex items-center justify-between group"
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-text-secondary text-sm font-mono">
-                                      {item.model_name}
+                              {teamQuotas
+                                .filter((q) => q.resource_type === 'gpu')
+                                .map((q) => (
+                                  <div
+                                    key={q.resource_config_id}
+                                    className="flex items-center justify-between"
+                                  >
+                                    <div>
+                                      <span className="text-white text-sm font-medium">
+                                        {q.display_name}
+                                      </span>
+                                      <p className="text-text-secondary text-xs">{q.resource_name}</p>
+                                    </div>
+                                    <span className="text-white font-bold">
+                                      {q.quota} {q.unit}
                                     </span>
                                   </div>
-                                  <div className="flex items-center gap-3">
-                                    <div className="flex items-center gap-2">
-                                      <input
-                                        type="number"
-                                        min="0"
-                                        value={item.limit}
-                                        onChange={(e) =>
-                                          updateGPUTypeLimit(
-                                            item.name,
-                                            item.model_name,
-                                            parseInt(e.target.value) || 0,
-                                          )
-                                        }
-                                        className={`w-24 px-3 py-1.5 bg-surface-dark border border-border-dark rounded-lg text-white text-sm font-mono font-bold focus:outline-none ${
-                                          canEditQuota
-                                            ? 'focus:border-primary'
-                                            : 'opacity-60 cursor-not-allowed'
-                                        }`}
-                                        disabled={!canEditQuota}
-                                      />
-                                      <span className="text-text-secondary text-xs font-bold">
-                                        Units
-                                      </span>
-                                    </div>
-                                    {canEditQuota && (
-                                      <button
-                                        onClick={() => removeGpuItem(item.model_name)}
-                                        className="text-text-secondary hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
-                                        title="Remove quota"
-                                      >
-                                        <span className="material-symbols-outlined text-[18px]">
-                                          delete
-                                        </span>
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
+                                ))}
                             </div>
-                          ) : (
-                            <div className="text-text-secondary text-sm italic">
-                              No GPU quotas configured.
-                              {canEditQuota && " Click 'Sync Types' to add defaults."}
-                            </div>
-                          )}
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </>
-                  ) : (
+                  ) : selectedTeamId ? (
                     <div className="text-center py-8 text-text-secondary">
-                      Failed to load quota data
+                      <span className="material-symbols-outlined text-[48px] block mb-2 opacity-30">
+                        inventory_2
+                      </span>
+                      <p>No team quotas configured</p>
+                      {isAdmin && (
+                        <Link
+                          to={`/teams/${selectedTeamId}/quota`}
+                          className="inline-flex items-center gap-2 mt-4 px-4 py-2 bg-primary/10 text-primary rounded-lg hover:bg-primary/20 transition-colors"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">settings</span>
+                          Configure Team Quotas
+                        </Link>
+                      )}
+                    </div>
+                  ) : (
+                    /* No team assigned */
+                    <div className="text-center py-12 text-text-secondary">
+                      <span className="material-symbols-outlined text-[64px] block mb-4 opacity-30">
+                        group_off
+                      </span>
+                      <p className="text-lg font-medium mb-2">No Team Assigned</p>
+                      <p className="text-sm max-w-md mx-auto">
+                        You are not assigned to any team. Resource quotas are managed at the team level.
+                        Please contact an administrator to be assigned to a team.
+                      </p>
                     </div>
                   )}
                 </div>
@@ -818,7 +623,7 @@ Type "DELETE" to confirm:`;
         </div>
       </div>
 
-      {canEditQuota && (
+      {isAdmin && (
         <div className="shrink-0 bg-[#0f1824] border-t border-border-dark p-6 z-20">
           <div className="max-w-6xl mx-auto w-full flex flex-col sm:flex-row items-center justify-between gap-4">
             <button
@@ -832,30 +637,17 @@ Type "DELETE" to confirm:`;
               <span className="material-symbols-outlined text-[20px]">delete_forever</span>
               Delete User Account
             </button>
-            <div className="flex items-center gap-3 w-full sm:w-auto">
-              <button className="flex-1 sm:flex-none h-11 px-8 rounded-xl bg-surface-dark border border-border-dark text-white font-bold text-sm hover:bg-surface-highlight transition-all active:scale-95">
-                Reset
-              </button>
-              <button
-                onClick={handleSaveQuota}
-                disabled={saving}
-                className="flex-1 sm:flex-none h-11 px-8 rounded-xl bg-primary text-white font-bold text-sm hover:bg-primary-dark shadow-xl shadow-primary/20 transition-all flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {saving ? (
-                  <>
-                    <span className="material-symbols-outlined text-[18px] animate-spin">
-                      refresh
-                    </span>
-                    Saving...
-                  </>
-                ) : (
-                  <>
-                    <span className="material-symbols-outlined text-[18px]">save</span>
-                    Save Changes
-                  </>
-                )}
-              </button>
-            </div>
+            {selectedTeamId && (
+              <p className="text-text-secondary text-sm">
+                Quotas managed by team.{' '}
+                <Link
+                  to={`/teams/${selectedTeamId}/quota`}
+                  className="text-primary hover:underline"
+                >
+                  Edit team quotas →
+                </Link>
+              </p>
+            )}
           </div>
         </div>
       )}
