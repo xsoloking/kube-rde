@@ -142,144 +142,136 @@ const WorkspaceCreate: React.FC = () => {
             </div>
           )}
 
-          <form onSubmit={handleCreate}>
-            {/* Unified Section with Grid Layout */}
-            <div className="bg-surface-dark rounded-xl border border-border-dark p-5 shadow-xl">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Left Column: General Information */}
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2 pb-3 border-b border-border-dark/50">
-                    <span className="material-symbols-outlined text-primary text-[18px]">
-                      badge
-                    </span>
-                    <h3 className="text-sm font-bold text-white">General Information</h3>
-                  </div>
-
-                  <div className="space-y-3">
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">
-                        Workspace Name <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        className="w-full bg-background-dark border border-border-dark rounded-lg h-9 px-3 text-white focus:ring-1 focus:ring-primary focus:border-primary placeholder:text-text-secondary/30 transition-all text-sm"
-                        placeholder="e.g., production-env"
-                        type="text"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        disabled={loading}
-                      />
-                    </div>
-
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">
-                        Description <span className="text-slate-500 font-normal">(Optional)</span>
-                      </label>
-                      <textarea
-                        className="w-full bg-background-dark border border-border-dark rounded-lg p-3 text-white focus:ring-1 focus:ring-primary focus:border-primary outline-none placeholder:text-text-secondary/30 text-sm leading-relaxed resize-none"
-                        placeholder="Describe the purpose..."
-                        rows={3}
-                        value={description}
-                        onChange={(e) => setDescription(e.target.value)}
-                        disabled={loading}
-                      ></textarea>
-                    </div>
-                  </div>
+          <form onSubmit={handleCreate} className="flex-1 flex flex-col min-h-0">
+            <div className="flex-1 flex flex-col gap-4">
+              {/* General Information Card */}
+              <div className="bg-surface-dark rounded-xl border border-border-dark p-5 shadow-xl flex-1 flex flex-col">
+                <div className="flex items-center gap-2 pb-3 border-b border-border-dark/50 mb-4">
+                  <span className="material-symbols-outlined text-primary text-[18px]">badge</span>
+                  <h3 className="text-sm font-bold text-white">General Information</h3>
                 </div>
 
-                {/* Right Column: Storage Configuration */}
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2 pb-3 border-b border-border-dark/50">
-                    <span className="material-symbols-outlined text-primary text-[18px]">
-                      storage
-                    </span>
-                    <h3 className="text-sm font-bold text-white">Storage Configuration</h3>
+                <div className="space-y-3 flex-1 flex flex-col">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">
+                      Workspace Name <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      className="w-full bg-background-dark border border-border-dark rounded-lg h-9 px-3 text-white focus:ring-1 focus:ring-primary focus:border-primary placeholder:text-text-secondary/30 transition-all text-sm"
+                      placeholder="e.g., production-env"
+                      type="text"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      disabled={loading}
+                    />
                   </div>
 
-                  <div className="space-y-3">
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">
-                        Storage Class <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        className="w-full bg-background-dark border border-border-dark rounded-lg h-9 px-3 text-white focus:ring-1 focus:ring-primary focus:border-primary transition-all text-sm cursor-pointer"
-                        value={storageClass}
-                        onChange={(e) => {
-                          setStorageClass(e.target.value);
-                          const quotaItem = quota?.storage_quota?.find(
-                            (item) => item.name === e.target.value,
-                          );
-                          const newLimit = quotaItem?.limit_gi || 100;
-                          if (parseInt(storageSize) > newLimit) {
-                            setStorageSize(newLimit.toString());
-                          }
-                        }}
-                        disabled={loading || availableStorageClasses.length === 0}
-                      >
-                        {availableStorageClasses.length === 0 ? (
-                          <option value="standard">standard (default)</option>
-                        ) : (
-                          availableStorageClasses.map((sc) => {
-                            const quotaItem = quota?.storage_quota?.find(
-                              (item) => item.name === sc.name,
-                            );
-                            const limit = quotaItem?.limit_gi;
-                            return (
-                              <option key={sc.name} value={sc.name}>
-                                {sc.name} {limit !== undefined ? `(${limit}Gi)` : ''}
-                              </option>
-                            );
-                          })
-                        )}
-                      </select>
-                    </div>
-
-                    <div className="flex flex-col gap-1.5">
-                      <div className="flex items-center justify-between">
-                        <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">
-                          Storage Size <span className="text-red-500">*</span>
-                        </label>
-                        <span className="text-lg font-bold text-primary font-mono">
-                          {storageSize}
-                          <span className="text-[10px] text-text-secondary ml-1">Gi</span>
-                        </span>
-                      </div>
-                      <input
-                        className="w-full accent-primary h-2"
-                        type="range"
-                        min="1"
-                        max={(() => {
-                          const quotaItem = quota?.storage_quota?.find(
-                            (item) => item.name === storageClass,
-                          );
-                          return quotaItem?.limit_gi || 100;
-                        })()}
-                        step="1"
-                        value={storageSize}
-                        onChange={(e) => setStorageSize(e.target.value)}
-                        disabled={loading}
-                      />
-                      <div className="flex items-center justify-between text-[10px]">
-                        <span className="text-text-secondary">1 Gi</span>
-                        <span className="text-primary font-bold">
-                          Quota:{' '}
-                          {quota?.storage_quota?.find((item) => item.name === storageClass)
-                            ?.limit_gi || 100}{' '}
-                          Gi
-                        </span>
-                      </div>
-                    </div>
+                  <div className="flex flex-col gap-1.5 flex-1">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">
+                      Description <span className="text-slate-500 font-normal">(Optional)</span>
+                    </label>
+                    <textarea
+                      className="w-full bg-background-dark border border-border-dark rounded-lg p-3 text-white focus:ring-1 focus:ring-primary focus:border-primary outline-none placeholder:text-text-secondary/30 text-sm leading-relaxed resize-none h-full"
+                      placeholder="Describe the purpose..."
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      disabled={loading}
+                    ></textarea>
                   </div>
                 </div>
               </div>
 
-              {/* Info Footer */}
-              <div className="mt-4 pt-4 border-t border-border-dark/50 flex items-center gap-3">
-                <span className="material-symbols-outlined text-blue-400 text-[16px] icon-fill">
-                  info
-                </span>
-                <p className="text-[10px] text-text-secondary">
-                  You can create services and manage configurations after the workspace is created.
-                </p>
+              {/* Storage Configuration Card */}
+              <div className="bg-surface-dark rounded-xl border border-border-dark p-5 shadow-xl">
+                <div className="flex items-center gap-2 pb-3 border-b border-border-dark/50 mb-4">
+                  <span className="material-symbols-outlined text-primary text-[18px]">storage</span>
+                  <h3 className="text-sm font-bold text-white">Storage Configuration</h3>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">
+                      Storage Class <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      className="w-full bg-background-dark border border-border-dark rounded-lg h-9 px-3 text-white focus:ring-1 focus:ring-primary focus:border-primary transition-all text-sm cursor-pointer"
+                      value={storageClass}
+                      onChange={(e) => {
+                        setStorageClass(e.target.value);
+                        const quotaItem = quota?.storage_quota?.find(
+                          (item) => item.name === e.target.value,
+                        );
+                        const newLimit = quotaItem?.limit_gi || 100;
+                        if (parseInt(storageSize) > newLimit) {
+                          setStorageSize(newLimit.toString());
+                        }
+                      }}
+                      disabled={loading || availableStorageClasses.length === 0}
+                    >
+                      {availableStorageClasses.length === 0 ? (
+                        <option value="standard">standard (default)</option>
+                      ) : (
+                        availableStorageClasses.map((sc) => {
+                          const quotaItem = quota?.storage_quota?.find(
+                            (item) => item.name === sc.name,
+                          );
+                          const limit = quotaItem?.limit_gi;
+                          return (
+                            <option key={sc.name} value={sc.name}>
+                              {sc.name} {limit !== undefined ? `(${limit}Gi)` : ''}
+                            </option>
+                          );
+                        })
+                      )}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">
+                        Storage Size <span className="text-red-500">*</span>
+                      </label>
+                      <span className="text-lg font-bold text-primary font-mono">
+                        {storageSize}
+                        <span className="text-[10px] text-text-secondary ml-1">Gi</span>
+                      </span>
+                    </div>
+                    <input
+                      className="w-full accent-primary h-2"
+                      type="range"
+                      min="1"
+                      max={(() => {
+                        const quotaItem = quota?.storage_quota?.find(
+                          (item) => item.name === storageClass,
+                        );
+                        return quotaItem?.limit_gi || 100;
+                      })()}
+                      step="1"
+                      value={storageSize}
+                      onChange={(e) => setStorageSize(e.target.value)}
+                      disabled={loading}
+                    />
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className="text-text-secondary">1 Gi</span>
+                      <span className="text-primary font-bold">
+                        Quota:{' '}
+                        {quota?.storage_quota?.find((item) => item.name === storageClass)?.limit_gi ||
+                          100}{' '}
+                        Gi
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Info Footer */}
+                <div className="mt-4 pt-4 border-t border-border-dark/50 flex items-center gap-3">
+                  <span className="material-symbols-outlined text-blue-400 text-[16px] icon-fill">
+                    info
+                  </span>
+                  <p className="text-[10px] text-text-secondary">
+                    You can create services and manage configurations after the workspace is created.
+                  </p>
+                </div>
               </div>
             </div>
           </form>
