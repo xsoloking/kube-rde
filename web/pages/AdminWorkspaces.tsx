@@ -249,10 +249,10 @@ const AdminWorkspaces: React.FC = () => {
               )}
               {!loading &&
                 workspaces.map((ws) => (
-                  <tr key={ws.id} className="hover:bg-white/5 transition-colors group">
+                  <tr key={ws.id} className="hover:bg-surface-highlight transition-colors group">
                     <td className="p-5">
                       <div className="flex items-center gap-3">
-                        <div className="size-10 rounded-lg bg-surface-dark flex items-center justify-center border border-white/5">
+                        <div className="size-10 rounded-lg bg-surface-dark flex items-center justify-center border border-border-dark">
                           <span className="material-symbols-outlined text-[20px] text-primary">
                             folder
                           </span>
@@ -260,7 +260,7 @@ const AdminWorkspaces: React.FC = () => {
                         <div>
                           <Link
                             to={`/workspaces/${ws.id}`}
-                            className="font-bold text-white text-sm hover:text-primary transition-colors"
+                            className="font-bold text-text-foreground text-sm hover:text-primary transition-colors"
                           >
                             {ws.name}
                           </Link>
@@ -272,7 +272,7 @@ const AdminWorkspaces: React.FC = () => {
                     </td>
                     <td className="p-5">
                       <div className="flex flex-col">
-                        <span className="font-medium text-white">
+                        <span className="font-medium text-text-foreground">
                           {ws.owner?.username || 'Unknown'}
                         </span>
                         {ws.owner?.email && (
@@ -289,7 +289,7 @@ const AdminWorkspaces: React.FC = () => {
                     <td className="p-5">
                       <div className="flex flex-col gap-1">
                         <div className="flex items-center gap-2">
-                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest bg-surface-highlight border border-white/5">
+                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest bg-surface-highlight border border-border-dark">
                             {ws.services?.length || 0} Total
                           </span>
                         </div>
@@ -331,14 +331,14 @@ const AdminWorkspaces: React.FC = () => {
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page === 1}
-              className="px-3 py-1.5 rounded-lg border border-border-dark text-xs font-bold text-text-secondary hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+              className="px-3 py-1.5 rounded-lg border border-border-dark text-xs font-bold text-text-secondary hover:bg-surface-highlight disabled:opacity-30 disabled:cursor-not-allowed transition-all"
             >
               Previous
             </button>
             <button
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={page >= totalPages}
-              className="px-3 py-1.5 rounded-lg border border-border-dark text-xs font-bold text-text-secondary hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+              className="px-3 py-1.5 rounded-lg border border-border-dark text-xs font-bold text-text-secondary hover:bg-surface-highlight disabled:opacity-30 disabled:cursor-not-allowed transition-all"
             >
               Next
             </button>

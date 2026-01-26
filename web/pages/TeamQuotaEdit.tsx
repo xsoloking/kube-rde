@@ -119,17 +119,17 @@ const TeamQuotaEdit: React.FC = () => {
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-3 text-text-secondary mb-2">
-            <Link to="/teams" className="hover:text-white transition-colors">
+            <Link to="/teams" className="hover:text-text-foreground transition-colors">
               Teams
             </Link>
             <span className="material-symbols-outlined text-[16px]">chevron_right</span>
-            <span className="text-white">{team.display_name}</span>
+            <span className="text-text-foreground">{team.display_name}</span>
             <span className="material-symbols-outlined text-[16px]">chevron_right</span>
-            <span className="text-white">Quota</span>
+            <span className="text-text-foreground">Quota</span>
           </div>
           <h2 className="text-4xl font-bold tracking-tight">Team Quota</h2>
           <p className="text-text-secondary max-w-2xl text-lg">
-            Set resource quotas for <span className="text-white font-medium">{team.display_name}</span>.
+            Set resource quotas for <span className="text-text-foreground font-medium">{team.display_name}</span>.
             Resources will be shared among all team members.
           </p>
         </div>
@@ -224,7 +224,7 @@ const TeamQuotaEdit: React.FC = () => {
                   className="p-4 bg-background-dark rounded-xl border border-border-dark"
                 >
                   <div className="flex items-center justify-between mb-3">
-                    <span className="font-bold text-white">{q.display_name}</span>
+                    <span className="font-bold text-text-foreground">{q.display_name}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <input
@@ -274,7 +274,7 @@ const TeamQuotaEdit: React.FC = () => {
                       </span>
                     </div>
                     <div>
-                      <span className="font-bold text-white block">{q.display_name}</span>
+                      <span className="font-bold text-text-foreground block">{q.display_name}</span>
                       <span className="text-xs text-text-secondary">{q.resource_name}</span>
                     </div>
                   </div>

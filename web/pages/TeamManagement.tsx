@@ -355,7 +355,7 @@ Type "DELETE" to confirm:`;
                           </span>
                         </div>
                         <div>
-                          <p className="font-bold text-white">{team.display_name}</p>
+                          <p className="font-bold text-text-foreground">{team.display_name}</p>
                           <p className="text-text-secondary text-xs">{team.name}</p>
                         </div>
                       </div>
@@ -388,21 +388,21 @@ Type "DELETE" to confirm:`;
                       <div className="flex justify-end gap-2">
                         <button
                           onClick={() => handleViewMembers(team)}
-                          className="p-2 rounded-lg hover:bg-surface-highlight text-text-secondary hover:text-white transition-colors"
+                          className="p-2 rounded-lg hover:bg-surface-highlight text-text-secondary hover:text-text-foreground transition-colors"
                           title="View Members"
                         >
                           <span className="material-symbols-outlined text-[20px]">group</span>
                         </button>
                         <Link
                           to={`/teams/${team.id}/quota`}
-                          className="p-2 rounded-lg hover:bg-surface-highlight text-text-secondary hover:text-white transition-colors"
+                          className="p-2 rounded-lg hover:bg-surface-highlight text-text-secondary hover:text-text-foreground transition-colors"
                           title="Edit Quota"
                         >
                           <span className="material-symbols-outlined text-[20px]">tune</span>
                         </Link>
                         <button
                           onClick={() => handleEditClick(team)}
-                          className="p-2 rounded-lg hover:bg-surface-highlight text-text-secondary hover:text-white transition-colors"
+                          className="p-2 rounded-lg hover:bg-surface-highlight text-text-secondary hover:text-text-foreground transition-colors"
                           title="Edit Team"
                         >
                           <span className="material-symbols-outlined text-[20px]">edit</span>
@@ -639,7 +639,7 @@ Type "DELETE" to confirm:`;
                         </span>
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium text-white text-sm truncate">{user.username}</p>
+                        <p className="font-medium text-text-foreground text-sm truncate">{user.username}</p>
                         <p className="text-text-secondary text-xs truncate">{user.email || 'No email'}</p>
                       </div>
                     </button>
@@ -685,7 +685,7 @@ Type "DELETE" to confirm:`;
                       </span>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="font-bold text-white truncate">{member.username}</p>
+                      <p className="font-bold text-text-foreground truncate">{member.username}</p>
                       <p className="text-text-secondary text-xs truncate">
                         {member.email || 'No email'}
                       </p>

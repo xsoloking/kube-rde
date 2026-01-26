@@ -145,7 +145,7 @@ const ResourceManagement: React.FC = () => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <div className="text-white">Loading...</div>
+        <div className="text-text-foreground">Loading...</div>
       </div>
     );
   }
@@ -166,7 +166,7 @@ const ResourceManagement: React.FC = () => {
       <div className="max-w-4xl mx-auto">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-white mb-2">Resource Management</h1>
+          <h1 className="text-3xl font-bold text-text-foreground mb-2">Resource Management</h1>
           <p className="text-text-secondary">
             Configure system-wide resource quotas and defaults for new users
           </p>
@@ -192,7 +192,7 @@ const ResourceManagement: React.FC = () => {
             <div className="flex items-center gap-3 mb-6 pb-4 border-b border-border-dark">
               <span className="material-symbols-outlined text-primary text-2xl">settings</span>
               <div>
-                <h2 className="text-xl font-bold text-white">Default Team Quotas</h2>
+                <h2 className="text-xl font-bold text-text-foreground">Default Team Quotas</h2>
                 <p className="text-text-secondary text-sm mt-1">
                   Configure default resource limits for new users
                 </p>
@@ -214,7 +214,7 @@ const ResourceManagement: React.FC = () => {
                     onChange={(e) =>
                       setConfig({ ...config, default_cpu_cores: parseInt(e.target.value) || 0 })
                     }
-                    className="w-full px-4 py-2 bg-background-dark border border-border-dark rounded-lg text-white focus:border-primary focus:outline-none"
+                    className="w-full px-4 py-2 bg-background-dark border border-border-dark rounded-lg text-text-foreground focus:border-primary focus:outline-none"
                   />
                 </div>
 
@@ -230,7 +230,7 @@ const ResourceManagement: React.FC = () => {
                     onChange={(e) =>
                       setConfig({ ...config, default_memory_gi: parseInt(e.target.value) || 0 })
                     }
-                    className="w-full px-4 py-2 bg-background-dark border border-border-dark rounded-lg text-white focus:border-primary focus:outline-none"
+                    className="w-full px-4 py-2 bg-background-dark border border-border-dark rounded-lg text-text-foreground focus:border-primary focus:outline-none"
                   />
                 </div>
               </div>
@@ -271,7 +271,7 @@ const ResourceManagement: React.FC = () => {
                             placeholder="Class name (e.g., local-path)"
                             value={sc.name}
                             onChange={(e) => updateStorageClass(index, 'name', e.target.value)}
-                            className="flex-1 px-3 py-1.5 bg-surface-dark border border-border-dark rounded-lg text-white text-sm focus:border-primary focus:outline-none"
+                            className="flex-1 px-3 py-1.5 bg-surface-dark border border-border-dark rounded-lg text-text-foreground text-sm focus:border-primary focus:outline-none"
                           />
                           <input
                             type="number"
@@ -281,7 +281,7 @@ const ResourceManagement: React.FC = () => {
                             onChange={(e) =>
                               updateStorageClass(index, 'limit_gi', parseInt(e.target.value) || 0)
                             }
-                            className="w-24 px-3 py-1.5 bg-surface-dark border border-border-dark rounded-lg text-white text-sm focus:border-primary focus:outline-none"
+                            className="w-24 px-3 py-1.5 bg-surface-dark border border-border-dark rounded-lg text-text-foreground text-sm focus:border-primary focus:outline-none"
                           />
                           <button
                             onClick={() => removeStorageClass(index)}
@@ -345,7 +345,7 @@ const ResourceManagement: React.FC = () => {
                                   onChange={(e) =>
                                     updateGPUType(index, 'model_name', e.target.value)
                                   }
-                                  className="w-full px-3 py-1.5 bg-background-dark border border-border-dark rounded-lg text-white text-sm focus:border-primary focus:outline-none"
+                                  className="w-full px-3 py-1.5 bg-background-dark border border-border-dark rounded-lg text-text-foreground text-sm focus:border-primary focus:outline-none"
                                 />
                               </div>
                             </div>
@@ -369,7 +369,7 @@ const ResourceManagement: React.FC = () => {
                                 onChange={(e) =>
                                   updateGPUType(index, 'resource_name', e.target.value)
                                 }
-                                className="w-full px-3 py-1.5 bg-background-dark border border-border-dark rounded-lg text-white text-sm focus:border-primary focus:outline-none font-mono"
+                                className="w-full px-3 py-1.5 bg-background-dark border border-border-dark rounded-lg text-text-foreground text-sm focus:border-primary focus:outline-none font-mono"
                               />
                             </div>
                             <div>
@@ -384,7 +384,7 @@ const ResourceManagement: React.FC = () => {
                                 onChange={(e) =>
                                   updateGPUType(index, 'limit', parseInt(e.target.value) || 0)
                                 }
-                                className="w-full px-3 py-1.5 bg-background-dark border border-border-dark rounded-lg text-white text-sm focus:border-primary focus:outline-none"
+                                className="w-full px-3 py-1.5 bg-background-dark border border-border-dark rounded-lg text-text-foreground text-sm focus:border-primary focus:outline-none"
                               />
                             </div>
                           </div>
@@ -401,7 +401,7 @@ const ResourceManagement: React.FC = () => {
                                 onChange={(e) =>
                                   updateGPUType(index, 'node_label_key', e.target.value)
                                 }
-                                className="w-full px-3 py-1.5 bg-background-dark border border-border-dark rounded-lg text-white text-sm focus:border-primary focus:outline-none font-mono"
+                                className="w-full px-3 py-1.5 bg-background-dark border border-border-dark rounded-lg text-text-foreground text-sm focus:border-primary focus:outline-none font-mono"
                               />
                             </div>
                             <div>
@@ -415,7 +415,7 @@ const ResourceManagement: React.FC = () => {
                                 onChange={(e) =>
                                   updateGPUType(index, 'node_label_value', e.target.value)
                                 }
-                                className="w-full px-3 py-1.5 bg-background-dark border border-border-dark rounded-lg text-white text-sm focus:border-primary focus:outline-none font-mono"
+                                className="w-full px-3 py-1.5 bg-background-dark border border-border-dark rounded-lg text-text-foreground text-sm focus:border-primary focus:outline-none font-mono"
                               />
                             </div>
                           </div>

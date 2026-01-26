@@ -330,7 +330,7 @@ Type "DELETE" to confirm:`;
               <span>Delete ({selectedUsers.length})</span>
             </button>
           )}
-          <button className="flex items-center gap-2 px-6 h-11 text-sm font-bold text-white bg-background-dark hover:bg-surface-highlight border border-border-dark rounded-xl transition-all">
+          <button className="flex items-center gap-2 px-6 h-11 text-sm font-bold text-text-foreground bg-background-dark hover:bg-surface-highlight border border-border-dark rounded-xl transition-all">
             <span className="material-symbols-outlined text-[20px]">filter_list</span>
             <span>Filters</span>
           </button>
@@ -405,7 +405,7 @@ Type "DELETE" to confirm:`;
                 </tr>
               )}
               {paginatedUsers.map((user) => (
-                <tr key={user.id} className="group hover:bg-white/5 transition-colors">
+                <tr key={user.id} className="group hover:bg-surface-highlight transition-colors">
                   <td className="p-5 text-center">
                     <input
                       className="w-4 h-4 rounded border-border-dark bg-transparent text-primary focus:ring-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
@@ -430,7 +430,7 @@ Type "DELETE" to confirm:`;
                       <div className="flex flex-col">
                         <Link
                           to={`/users/${user.id}`}
-                          className="font-bold text-white hover:text-primary transition-colors"
+                          className="font-bold text-text-foreground hover:text-primary transition-colors"
                         >
                           {user.username}
                         </Link>
@@ -474,14 +474,14 @@ Type "DELETE" to confirm:`;
                     <div className="flex items-center justify-end gap-2">
                       <Link
                         to={`/users/${user.id}`}
-                        className="p-2 text-text-secondary hover:text-primary transition-all rounded-lg hover:bg-white/5"
+                        className="p-2 text-text-secondary hover:text-primary transition-all rounded-lg hover:bg-surface-highlight"
                       >
                         <span className="material-symbols-outlined">edit</span>
                       </Link>
                       <button
                         onClick={() => handleDeleteUser(user.id)}
                         disabled={currentUser?.id === user.id}
-                        className="p-2 text-text-secondary hover:text-red-500 transition-all rounded-lg hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-text-secondary"
+                        className="p-2 text-text-secondary hover:text-red-500 transition-all rounded-lg hover:bg-surface-highlight disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-text-secondary"
                         title={
                           currentUser?.id === user.id
                             ? 'You cannot delete your own account'
@@ -501,21 +501,21 @@ Type "DELETE" to confirm:`;
         <div className="flex flex-col sm:flex-row items-center justify-between p-5 border-t border-border-dark gap-4">
           <div className="text-xs text-text-secondary font-medium">
             Showing{' '}
-            <span className="font-bold text-white">
+            <span className="font-bold text-text-foreground">
               {filteredUsers.length > 0 ? startIndex + 1 : 0}
             </span>{' '}
             to{' '}
-            <span className="font-bold text-white">
+            <span className="font-bold text-text-foreground">
               {Math.min(startIndex + itemsPerPage, filteredUsers.length)}
             </span>{' '}
-            of <span className="font-bold text-white">{filteredUsers.length}</span> results
+            of <span className="font-bold text-text-foreground">{filteredUsers.length}</span> results
           </div>
           {totalPages > 1 && (
             <div className="flex items-center gap-2">
               <button
                 onClick={() => handlePageChange(currentPage - 1)}
                 disabled={currentPage === 1}
-                className="p-2 rounded-lg border border-border-dark text-text-secondary hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                className="p-2 rounded-lg border border-border-dark text-text-secondary hover:bg-surface-highlight disabled:opacity-30 disabled:cursor-not-allowed transition-all"
               >
                 <span className="material-symbols-outlined text-[20px]">chevron_left</span>
               </button>
@@ -527,7 +527,7 @@ Type "DELETE" to confirm:`;
                   className={`w-9 h-9 flex items-center justify-center rounded-lg text-sm font-bold transition-all ${
                     currentPage === page
                       ? 'bg-primary text-white shadow-lg shadow-primary/20'
-                      : 'border border-border-dark text-text-secondary hover:bg-white/5'
+                      : 'border border-border-dark text-text-secondary hover:bg-surface-highlight'
                   }`}
                 >
                   {page}
@@ -537,7 +537,7 @@ Type "DELETE" to confirm:`;
               <button
                 onClick={() => handlePageChange(currentPage + 1)}
                 disabled={currentPage === totalPages}
-                className="p-2 rounded-lg border border-border-dark text-text-secondary hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                className="p-2 rounded-lg border border-border-dark text-text-secondary hover:bg-surface-highlight disabled:opacity-30 disabled:cursor-not-allowed transition-all"
               >
                 <span className="material-symbols-outlined text-[20px]">chevron_right</span>
               </button>
@@ -551,10 +551,10 @@ Type "DELETE" to confirm:`;
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-surface-dark border border-border-dark rounded-2xl shadow-xl max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-border-dark flex items-center justify-between">
-              <h3 className="text-xl font-bold text-white">Create New User</h3>
+              <h3 className="text-xl font-bold text-text-foreground">Create New User</h3>
               <button
                 onClick={() => setShowCreateModal(false)}
-                className="p-2 text-text-secondary hover:text-white transition-colors rounded-lg hover:bg-white/5"
+                className="p-2 text-text-secondary hover:text-text-foreground transition-colors rounded-lg hover:bg-surface-highlight"
               >
                 <span className="material-symbols-outlined">close</span>
               </button>
@@ -569,7 +569,7 @@ Type "DELETE" to confirm:`;
                   type="text"
                   value={newUser.username}
                   onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
-                  className="w-full px-4 py-2 bg-background-dark border border-border-dark rounded-lg text-white focus:border-primary focus:outline-none"
+                  className="w-full px-4 py-2 bg-background-dark border border-border-dark rounded-lg text-text-foreground focus:border-primary focus:outline-none"
                   required
                 />
               </div>
@@ -582,7 +582,7 @@ Type "DELETE" to confirm:`;
                   type="email"
                   value={newUser.email}
                   onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
-                  className="w-full px-4 py-2 bg-background-dark border border-border-dark rounded-lg text-white focus:border-primary focus:outline-none"
+                  className="w-full px-4 py-2 bg-background-dark border border-border-dark rounded-lg text-text-foreground focus:border-primary focus:outline-none"
                   required
                 />
               </div>
@@ -595,7 +595,7 @@ Type "DELETE" to confirm:`;
                   type="password"
                   value={newUser.password}
                   onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-                  className="w-full px-4 py-2 bg-background-dark border border-border-dark rounded-lg text-white focus:border-primary focus:outline-none"
+                  className="w-full px-4 py-2 bg-background-dark border border-border-dark rounded-lg text-text-foreground focus:border-primary focus:outline-none"
                   required
                   minLength={8}
                 />
@@ -613,7 +613,7 @@ Type "DELETE" to confirm:`;
                         onChange={() => toggleRole(role)}
                         className="w-4 h-4 rounded border-border-dark bg-transparent text-primary focus:ring-primary cursor-pointer"
                       />
-                      <span className="text-white capitalize">{role}</span>
+                      <span className="text-text-foreground capitalize">{role}</span>
                     </label>
                   ))}
                 </div>
@@ -627,7 +627,7 @@ Type "DELETE" to confirm:`;
                     onChange={(e) => setNewUser({ ...newUser, enabled: e.target.checked })}
                     className="w-4 h-4 rounded border-border-dark bg-transparent text-primary focus:ring-primary cursor-pointer"
                   />
-                  <span className="text-white">Enabled</span>
+                  <span className="text-text-foreground">Enabled</span>
                 </label>
               </div>
 
@@ -635,7 +635,7 @@ Type "DELETE" to confirm:`;
                 <button
                   type="button"
                   onClick={() => setShowCreateModal(false)}
-                  className="flex-1 px-4 py-2 bg-background-dark border border-border-dark text-white rounded-lg hover:bg-surface-highlight transition-all"
+                  className="flex-1 px-4 py-2 bg-background-dark border border-border-dark text-text-foreground rounded-lg hover:bg-surface-highlight transition-all"
                   disabled={creating}
                 >
                   Cancel

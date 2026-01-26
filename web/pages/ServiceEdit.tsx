@@ -187,7 +187,7 @@ const ServiceEdit: React.FC = () => {
     <div className="p-8 lg:px-12 lg:py-6 max-w-[1000px] mx-auto w-full animate-fade-in space-y-8">
       {/* Breadcrumbs */}
       <nav className="flex items-center gap-3 text-xs font-medium">
-        <Link to="/workspaces" className="text-text-secondary hover:text-white transition-colors">
+        <Link to="/workspaces" className="text-text-secondary hover:text-text-foreground transition-colors">
           Workspaces
         </Link>
         <span className="material-symbols-outlined text-[14px] text-text-secondary">
@@ -197,7 +197,7 @@ const ServiceEdit: React.FC = () => {
           <>
             <Link
               to={`/workspaces/${workspaceId}`}
-              className="text-text-secondary hover:text-white transition-colors truncate"
+              className="text-text-secondary hover:text-text-foreground transition-colors truncate"
             >
               {workspaceId}
             </Link>
@@ -206,7 +206,7 @@ const ServiceEdit: React.FC = () => {
             </span>
           </>
         )}
-        <span className="text-white">Edit Service</span>
+        <span className="text-text-foreground">Edit Service</span>
       </nav>
 
       {/* Header */}
@@ -220,7 +220,7 @@ const ServiceEdit: React.FC = () => {
         <div className="flex items-center gap-4">
           <button
             onClick={() => navigate(-1)}
-            className="px-6 py-2.5 text-text-secondary hover:text-white font-bold text-xs uppercase tracking-widest transition-all"
+            className="px-6 py-2.5 text-text-secondary hover:text-text-foreground font-bold text-xs uppercase tracking-widest transition-all"
             disabled={saving}
           >
             Cancel
@@ -252,7 +252,7 @@ const ServiceEdit: React.FC = () => {
           </span>
         </div>
         <div>
-          <h3 className="text-sm font-bold text-white">{template?.name || serviceName}</h3>
+          <h3 className="text-sm font-bold text-text-foreground">{template?.name || serviceName}</h3>
           <p className="text-xs text-text-secondary">
             ID: {id} | Agent Type: {agentType}
           </p>
@@ -266,7 +266,7 @@ const ServiceEdit: React.FC = () => {
             <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center text-primary">
               <span className="material-symbols-outlined text-[20px]">memory</span>
             </div>
-            <h3 className="text-base font-bold text-white">Compute Resources</h3>
+            <h3 className="text-base font-bold text-text-foreground">Compute Resources</h3>
           </div>
 
           <div className="space-y-8">
@@ -376,7 +376,7 @@ const ServiceEdit: React.FC = () => {
                     <span className="material-symbols-outlined text-xl">developer_board</span>
                   </div>
                   <div>
-                    <h4 className="font-bold text-base text-white">Enable GPU Acceleration</h4>
+                    <h4 className="font-bold text-base text-text-foreground">Enable GPU Acceleration</h4>
                     <p className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">
                       Required for complex model training
                     </p>
@@ -401,7 +401,7 @@ const ServiceEdit: React.FC = () => {
                       GPU Model
                     </label>
                     <select
-                      className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-white focus:ring-1 focus:ring-primary focus:border-primary transition-all text-sm"
+                      className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-text-foreground focus:ring-1 focus:ring-primary focus:border-primary transition-all text-sm"
                       value={selectedGpuQuota?.model_name || ''}
                       onChange={(e) => {
                         const selected = gpuQuota.find((t) => t.model_name === e.target.value);
@@ -429,12 +429,12 @@ const ServiceEdit: React.FC = () => {
                         type="button"
                         onClick={() => setGpuCount(Math.max(1, gpuCount - 1))}
                         disabled={saving || gpuCount <= 1}
-                        className="size-8 flex items-center justify-center text-text-secondary hover:text-white hover:bg-white/5 rounded-lg transition-all disabled:opacity-30"
+                        className="size-8 flex items-center justify-center text-text-secondary hover:text-text-foreground hover:bg-surface-highlight rounded-lg transition-all disabled:opacity-30"
                       >
                         <span className="material-symbols-outlined text-sm">remove</span>
                       </button>
                       <input
-                        className="flex-1 bg-transparent text-center text-white font-mono font-bold border-none focus:ring-0 text-base"
+                        className="flex-1 bg-transparent text-center text-text-foreground font-mono font-bold border-none focus:ring-0 text-base"
                         type="text"
                         readOnly
                         value={gpuCount}
@@ -448,7 +448,7 @@ const ServiceEdit: React.FC = () => {
                         disabled={
                           saving || !selectedGpuQuota || gpuCount >= (selectedGpuQuota?.limit || 0)
                         }
-                        className="size-8 flex items-center justify-center text-text-secondary hover:text-white hover:bg-white/5 rounded-lg transition-all disabled:opacity-30"
+                        className="size-8 flex items-center justify-center text-text-secondary hover:text-text-foreground hover:bg-surface-highlight rounded-lg transition-all disabled:opacity-30"
                       >
                         <span className="material-symbols-outlined text-sm">add</span>
                       </button>
@@ -470,7 +470,7 @@ const ServiceEdit: React.FC = () => {
                   <span className="material-symbols-outlined text-xl">schedule</span>
                 </div>
                 <div className="flex-1">
-                  <h4 className="font-bold text-base text-white">Idle Timeout (TTL)</h4>
+                  <h4 className="font-bold text-base text-text-foreground">Idle Timeout (TTL)</h4>
                   <p className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">
                     Auto-stop after inactivity period
                   </p>
@@ -483,7 +483,7 @@ const ServiceEdit: React.FC = () => {
                     Timeout Duration
                   </label>
                   <input
-                    className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-white focus:ring-1 focus:ring-primary focus:border-primary transition-all text-sm font-mono"
+                    className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-text-foreground focus:ring-1 focus:ring-primary focus:border-primary transition-all text-sm font-mono"
                     type="text"
                     value={ttl}
                     onChange={(e) => setTtl(e.target.value)}
@@ -561,7 +561,7 @@ const ServiceEdit: React.FC = () => {
             <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center text-primary">
               <span className="material-symbols-outlined text-[20px]">settings</span>
             </div>
-            <h3 className="text-base font-bold text-white flex-1 text-left">
+            <h3 className="text-base font-bold text-text-foreground flex-1 text-left">
               Advanced Options (Optional)
             </h3>
             <span
@@ -578,7 +578,7 @@ const ServiceEdit: React.FC = () => {
                   Startup Arguments
                 </label>
                 <textarea
-                  className="w-full bg-background-dark border border-border-dark rounded-xl p-4 text-white focus:ring-1 focus:ring-primary focus:border-primary placeholder:text-text-secondary/30 transition-all text-sm font-mono"
+                  className="w-full bg-background-dark border border-border-dark rounded-xl p-4 text-text-foreground focus:ring-1 focus:ring-primary focus:border-primary placeholder:text-text-secondary/30 transition-all text-sm font-mono"
                   placeholder="(none)"
                   rows={3}
                   value={startupArgs}
@@ -595,7 +595,7 @@ const ServiceEdit: React.FC = () => {
                   Environment Variables (JSON)
                 </label>
                 <textarea
-                  className="w-full bg-background-dark border border-border-dark rounded-xl p-4 text-white focus:ring-1 focus:ring-primary focus:border-primary placeholder:text-text-secondary/30 transition-all text-sm font-mono"
+                  className="w-full bg-background-dark border border-border-dark rounded-xl p-4 text-text-foreground focus:ring-1 focus:ring-primary focus:border-primary placeholder:text-text-secondary/30 transition-all text-sm font-mono"
                   placeholder='e.g., {"KEY": "value"}'
                   rows={3}
                   value={JSON.stringify(envVars, null, 2)}

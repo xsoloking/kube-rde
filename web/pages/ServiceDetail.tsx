@@ -330,19 +330,19 @@ const ServiceDetail: React.FC = () => {
       <nav className="flex items-center gap-3 text-xs font-medium">
         <Link
           to="/workspaces"
-          className="text-text-secondary hover:text-white transition-colors text-[10px] uppercase tracking-widest font-bold"
+          className="text-text-secondary hover:text-text-foreground transition-colors text-[10px] uppercase tracking-widest font-bold"
         >
           Workspaces
         </Link>
         <span className="text-text-secondary">/</span>
         <Link
           to={`/workspaces/${service.workspace_id}`}
-          className="text-text-secondary hover:text-white transition-colors text-[10px] uppercase tracking-widest font-bold"
+          className="text-text-secondary hover:text-text-foreground transition-colors text-[10px] uppercase tracking-widest font-bold"
         >
           Workspace
         </Link>
         <span className="text-text-secondary">/</span>
-        <span className="bg-surface-highlight text-white px-2 py-0.5 rounded text-[10px] font-mono">
+        <span className="bg-surface-highlight text-text-foreground px-2 py-0.5 rounded text-[10px] font-mono">
           {service.name}
         </span>
       </nav>
@@ -359,7 +359,7 @@ const ServiceDetail: React.FC = () => {
           </div>
           <div>
             <div className="flex items-center gap-4">
-              <h1 className="text-3xl font-bold tracking-tight text-white">{service.name}</h1>
+              <h1 className="text-3xl font-bold tracking-tight text-text-foreground">{service.name}</h1>
               <span
                 className={`px-2.5 py-0.5 rounded-full bg-${statusColor}-500/10 text-${statusColor}-400 text-[10px] font-bold uppercase tracking-widest border border-${statusColor}-500/20 flex items-center gap-1.5`}
               >
@@ -408,7 +408,7 @@ const ServiceDetail: React.FC = () => {
             className={`flex items-center gap-2 px-4 py-2 text-[10px] font-bold uppercase tracking-widest rounded-lg border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
               service.is_pinned
                 ? 'bg-primary/10 text-primary border-primary/20 hover:bg-primary/20'
-                : 'bg-surface-highlight text-text-secondary border-border-dark hover:text-white hover:bg-white/10'
+                : 'bg-surface-highlight text-text-secondary border-border-dark hover:text-text-foreground hover:bg-white/10'
             }`}
             title={
               service.is_pinned
@@ -426,7 +426,7 @@ const ServiceDetail: React.FC = () => {
           <button
             onClick={handleRestart}
             disabled={actionLoading || isStopped}
-            className="flex items-center gap-2 px-4 py-2 bg-surface-highlight hover:bg-white/10 text-white text-[10px] font-bold uppercase tracking-widest rounded-lg border border-border-dark transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 px-4 py-2 bg-surface-highlight hover:bg-white/10 text-text-foreground text-[10px] font-bold uppercase tracking-widest rounded-lg border border-border-dark transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             title={
               isStopped
                 ? 'Cannot restart a stopped service. Please start it first.'
@@ -473,13 +473,13 @@ const ServiceDetail: React.FC = () => {
               <div className="bg-surface-dark rounded-xl border border-border-dark overflow-hidden shadow-xl">
                 <div className="p-8 space-y-6">
                   <div className="flex justify-between items-center">
-                    <h4 className="font-bold text-xs uppercase tracking-widest flex items-center gap-2 text-white">
+                    <h4 className="font-bold text-xs uppercase tracking-widest flex items-center gap-2 text-text-foreground">
                       <span className="material-symbols-outlined text-primary text-[20px]">
                         terminal
                       </span>
                       SSH Access
                     </h4>
-                    <span className="text-[9px] font-bold text-white/40 uppercase tracking-widest">
+                    <span className="text-[9px] font-bold text-text-foreground/40 uppercase tracking-widest">
                       Step 1
                     </span>
                   </div>
@@ -490,7 +490,7 @@ const ServiceDetail: React.FC = () => {
                     <div className="flex items-center justify-between bg-background-dark/50 border border-border-dark p-3 rounded-lg">
                       <div className="flex items-center gap-3">
                         <span className="material-symbols-outlined text-primary">download</span>
-                        <span className="text-xs font-mono text-white/80">kuberde-cli-latest</span>
+                        <span className="text-xs font-mono text-text-foreground/80">kuberde-cli-latest</span>
                       </div>
                       <button
                         onClick={handleDownloadCLI}
@@ -507,13 +507,13 @@ const ServiceDetail: React.FC = () => {
               <div className="bg-surface-dark rounded-xl border border-border-dark overflow-hidden shadow-xl">
                 <div className="p-8 space-y-6">
                   <div className="flex justify-between items-center">
-                    <h4 className="font-bold text-xs uppercase tracking-widest flex items-center gap-2 text-white">
+                    <h4 className="font-bold text-xs uppercase tracking-widest flex items-center gap-2 text-text-foreground">
                       <span className="material-symbols-outlined text-emerald-500 text-[20px]">
                         bolt
                       </span>
                       Quick Connect
                     </h4>
-                    <span className="text-[9px] font-bold text-white/40 uppercase tracking-widest">
+                    <span className="text-[9px] font-bold text-text-foreground/40 uppercase tracking-widest">
                       Step 2
                     </span>
                   </div>
@@ -535,7 +535,7 @@ const ServiceDetail: React.FC = () => {
                             setCopiedLogin,
                           )
                         }
-                        className="absolute top-4 right-4 text-text-secondary hover:text-white transition-colors"
+                        className="absolute top-4 right-4 text-text-secondary hover:text-text-foreground transition-colors"
                       >
                         <span className="material-symbols-outlined text-[18px]">
                           {copiedLogin ? 'check' : 'content_copy'}
@@ -560,7 +560,7 @@ const ServiceDetail: React.FC = () => {
                             setCopiedSSH,
                           )
                         }
-                        className="absolute top-4 right-4 text-text-secondary hover:text-white transition-colors"
+                        className="absolute top-4 right-4 text-text-secondary hover:text-text-foreground transition-colors"
                       >
                         <span className="material-symbols-outlined text-[18px]">
                           {copiedSSH ? 'check' : 'content_copy'}
@@ -581,7 +581,7 @@ const ServiceDetail: React.FC = () => {
                     </div>
                     <p className="text-[10px] text-text-secondary/70 leading-relaxed">
                       Add this configuration to your{' '}
-                      <code className="text-xs bg-background-dark px-1.5 py-0.5 rounded font-mono text-white/80">
+                      <code className="text-xs bg-background-dark px-1.5 py-0.5 rounded font-mono text-text-foreground/80">
                         ~/.ssh/config
                       </code>{' '}
                       file for easier access
@@ -602,7 +602,7 @@ const ServiceDetail: React.FC = () => {
                             setCopiedSSHConfig,
                           )
                         }
-                        className="absolute top-4 right-4 text-text-secondary hover:text-white transition-colors"
+                        className="absolute top-4 right-4 text-text-secondary hover:text-text-foreground transition-colors"
                       >
                         <span className="material-symbols-outlined text-[18px]">
                           {copiedSSHConfig ? 'check' : 'content_copy'}
@@ -628,7 +628,7 @@ const ServiceDetail: React.FC = () => {
             <div className="bg-surface-dark rounded-xl border border-border-dark overflow-hidden shadow-xl">
               <div className="p-8 space-y-6">
                 <div className="flex justify-between items-center">
-                  <h4 className="font-bold text-xs uppercase tracking-widest flex items-center gap-2 text-white">
+                  <h4 className="font-bold text-xs uppercase tracking-widest flex items-center gap-2 text-text-foreground">
                     <span className="material-symbols-outlined text-primary text-[20px]">
                       language
                     </span>
@@ -644,7 +644,7 @@ const ServiceDetail: React.FC = () => {
                   </p>
                   <div className="flex gap-2">
                     <div className="flex-1 bg-background-dark/50 border border-border-dark p-3 rounded-lg flex items-center overflow-hidden">
-                      <span className="text-xs font-mono text-white/80 truncate">
+                      <span className="text-xs font-mono text-text-foreground/80 truncate">
                         http://{service.remote_proxy || `${service.agent_id}.192-168-97-2.nip.io`}/
                       </span>
                     </div>
@@ -655,7 +655,7 @@ const ServiceDetail: React.FC = () => {
                           setCopiedWebURL,
                         )
                       }
-                      className="bg-background-dark border border-border-dark p-3 rounded-lg text-text-secondary hover:text-white transition-all shadow-sm"
+                      className="bg-background-dark border border-border-dark p-3 rounded-lg text-text-secondary hover:text-text-foreground transition-all shadow-sm"
                       title="Copy URL"
                     >
                       <span className="material-symbols-outlined text-[20px]">
@@ -692,7 +692,7 @@ const ServiceDetail: React.FC = () => {
         <div className="bg-surface-dark rounded-xl border border-border-dark overflow-hidden shadow-xl">
           <div className="px-6 py-4 border-b border-border-dark bg-background-dark/30 flex justify-between items-center">
             <div className="flex items-center gap-4">
-              <h4 className="font-bold text-xs uppercase tracking-widest text-white/80">
+              <h4 className="font-bold text-xs uppercase tracking-widest text-text-foreground/80">
                 Container Logs
               </h4>
               <div className="flex gap-2">
@@ -701,7 +701,7 @@ const ServiceDetail: React.FC = () => {
                   className={`px-3 py-1 text-[10px] font-bold uppercase tracking-widest rounded transition-all ${
                     logsContainer === 'workload'
                       ? 'bg-primary text-white'
-                      : 'bg-background-dark text-text-secondary hover:text-white'
+                      : 'bg-background-dark text-text-secondary hover:text-text-foreground'
                   }`}
                 >
                   Workload
@@ -711,7 +711,7 @@ const ServiceDetail: React.FC = () => {
                   className={`px-3 py-1 text-[10px] font-bold uppercase tracking-widest rounded transition-all ${
                     logsContainer === 'kuberde-agent'
                       ? 'bg-primary text-white'
-                      : 'bg-background-dark text-text-secondary hover:text-white'
+                      : 'bg-background-dark text-text-secondary hover:text-text-foreground'
                   }`}
                 >
                   Agent
@@ -747,7 +747,7 @@ const ServiceDetail: React.FC = () => {
                 </div>
               </div>
             ) : logs ? (
-              <pre className="text-white/80 whitespace-pre-wrap break-words">{logs}</pre>
+              <pre className="text-text-foreground/80 whitespace-pre-wrap break-words">{logs}</pre>
             ) : (
               <div className="text-center py-8 text-text-secondary">No logs available</div>
             )}

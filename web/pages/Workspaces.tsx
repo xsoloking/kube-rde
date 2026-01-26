@@ -133,7 +133,7 @@ const Workspaces: React.FC = () => {
               <span className="material-symbols-outlined">search</span>
             </div>
             <input
-              className="block w-full rounded-xl border-border-dark bg-background-dark text-white pl-11 pr-4 py-3 focus:border-primary focus:ring-primary sm:text-sm outline-none transition-all placeholder:text-text-secondary/50"
+              className="block w-full rounded-xl border-border-dark bg-background-dark text-text-foreground pl-11 pr-4 py-3 focus:border-primary focus:ring-primary sm:text-sm outline-none transition-all placeholder:text-text-secondary/50"
               placeholder="Search by name, ID..."
               type="text"
               value={searchQuery}
@@ -146,7 +146,7 @@ const Workspaces: React.FC = () => {
                 Sort by:
               </span>
               <select
-                className="bg-background-dark border-border-dark text-white rounded-xl py-2 px-4 text-sm focus:border-primary focus:ring-primary outline-none cursor-pointer"
+                className="bg-background-dark border-border-dark text-text-foreground rounded-xl py-2 px-4 text-sm focus:border-primary focus:ring-primary outline-none cursor-pointer"
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as 'newest' | 'name')}
               >
@@ -197,7 +197,7 @@ const Workspaces: React.FC = () => {
                     <div className="flex-1">
                       <Link
                         to={`/workspaces/${ws.id}`}
-                        className="text-lg font-bold text-white group-hover:text-primary transition-colors block"
+                        className="text-lg font-bold text-text-foreground group-hover:text-primary transition-colors block"
                       >
                         {ws.name}
                       </Link>
@@ -211,7 +211,7 @@ const Workspaces: React.FC = () => {
                   </div>
                   <button
                     onClick={() => handleDeleteWorkspace(ws.id)}
-                    className="text-text-secondary hover:text-red-500 p-2 rounded-lg hover:bg-white/5 transition-all"
+                    className="text-text-secondary hover:text-red-500 p-2 rounded-lg hover:bg-surface-highlight transition-all"
                     title="Delete workspace"
                   >
                     <span className="material-symbols-outlined">delete</span>
@@ -244,7 +244,7 @@ const Workspaces: React.FC = () => {
                           >
                             {getServiceIcon(svc.agent_type)}
                           </span>
-                          <span className="text-xs font-bold text-white group-hover/svc:text-primary transition-colors max-w-[120px] truncate">
+                          <span className="text-xs font-bold text-text-foreground group-hover/svc:text-primary transition-colors max-w-[120px] truncate">
                             {svc.name}
                           </span>
                           <span className="material-symbols-outlined text-[14px] text-text-secondary opacity-0 group-hover/svc:opacity-100 -ml-1 transition-all">
@@ -284,7 +284,7 @@ const Workspaces: React.FC = () => {
               <span className="material-symbols-outlined text-4xl">add</span>
             </div>
             <div className="text-center">
-              <h3 className="text-lg font-bold text-white group-hover:text-primary mb-1 transition-colors">
+              <h3 className="text-lg font-bold text-text-foreground group-hover:text-primary mb-1 transition-colors">
                 Create New Workspace
               </h3>
               <p className="text-sm text-text-secondary">Launch a new development environment</p>

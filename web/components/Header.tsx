@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useTheme } from '../contexts/ThemeContext';
 
 const Header: React.FC = () => {
   const location = useLocation();
   const { user, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const pathParts = location.pathname.split('/').filter((p) => p);
 
@@ -30,7 +32,9 @@ const Header: React.FC = () => {
                   <span className="text-border-dark text-xs font-bold">/</span>
                   <span
                     className={
-                      i === pathParts.length - 1 ? 'text-white font-medium' : 'text-text-secondary'
+                      i === pathParts.length - 1
+                        ? 'text-text-foreground font-medium'
+                        : 'text-text-secondary'
                     }
                   >
                     {partStr.charAt(0).toUpperCase() + partStr.slice(1)}
@@ -42,23 +46,19 @@ const Header: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-4">
-          <div className="relative hidden md:block w-64 group">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary group-focus-within:text-primary transition-colors">
-              <span className="material-symbols-outlined text-[20px]">search</span>
+          <button
+            onClick={toggleTheme}
+            className="p-2 text-text-secondary hover:text-text-foreground transition-colors rounded-lg hover:bg-surface-highlight"
+            title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+          >
+            <span className="material-symbols-outlined text-[20px]">
+              {theme === 'dark' ? 'light_mode' : 'dark_mode'}
             </span>
-            <input
-              className="w-full h-10 pl-10 pr-4 bg-surface-dark border border-border-dark rounded-lg focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all placeholder:text-text-secondary/50 text-sm"
-              placeholder="Quick search (⌘K)..."
-              type="text"
-            />
-          </div>
-          <button className="relative p-2 text-text-secondary hover:text-white transition-colors rounded-lg hover:bg-white/5">
-            <span className="material-symbols-outlined text-[20px]">notifications</span>
-            <span className="absolute top-2 right-2 size-2 bg-red-500 rounded-full border-2 border-background-dark"></span>
           </button>
+
           <Link
             to="/help"
-            className="p-2 text-text-secondary hover:text-white transition-colors rounded-lg hover:bg-white/5"
+            className="p-2 text-text-secondary hover:text-text-foreground transition-colors rounded-lg hover:bg-surface-highlight"
             title="Help Center"
           >
             <span className="material-symbols-outlined text-[20px]">help</span>
@@ -68,9 +68,9 @@ const Header: React.FC = () => {
           <div className="relative">
             <button
               onClick={() => setShowUserMenu(!showUserMenu)}
-              className="flex items-center gap-2 p-2 text-text-secondary hover:text-white transition-colors rounded-lg hover:bg-white/5 ml-2"
+              className="flex items-center gap-2 p-2 text-text-secondary hover:text-text-foreground transition-colors rounded-lg hover:bg-surface-highlight ml-2"
             >
-              <div className="h-8 w-8 rounded-full bg-gradient-to-tr from-primary to-purple-500 flex items-center justify-center text-white font-bold text-xs border border-border-dark">
+              <div className="h-8 w-8 rounded-full bg-gradient-to-tr from-primary to-purple-500 flex items-center justify-center text-text-foreground font-bold text-xs border border-border-dark">
                 {user?.username?.substring(0, 2).toUpperCase() || 'U'}
               </div>
               <span className="text-sm font-medium hidden sm:block">
@@ -83,7 +83,7 @@ const Header: React.FC = () => {
             {showUserMenu && (
               <div className="absolute right-0 mt-2 w-64 bg-surface-dark border border-border-dark rounded-lg shadow-lg overflow-hidden z-10">
                 <div className="px-4 py-3 border-b border-border-dark">
-                  <p className="text-sm text-white font-medium">{user?.username || 'User'}</p>
+                  <p className="text-sm text-text-foreground font-medium">{user?.username || 'User'}</p>
                   <p className="text-xs text-text-secondary">{user?.email || 'No email'}</p>
                   {user?.roles && user.roles.length > 0 && (
                     <div className="mt-2 flex gap-1 flex-wrap">
@@ -101,7 +101,7 @@ const Header: React.FC = () => {
                 <Link
                   to={`/users/${user?.id}`}
                   onClick={() => setShowUserMenu(false)}
-                  className="w-full px-4 py-2.5 text-sm text-white hover:bg-white/5 transition-colors flex items-center gap-2"
+                  className="w-full px-4 py-2.5 text-sm text-text-foreground hover:bg-surface-highlight transition-colors flex items-center gap-2"
                 >
                   <span className="material-symbols-outlined text-[18px] text-primary">person</span>
                   Profile Details

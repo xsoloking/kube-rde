@@ -26,7 +26,7 @@ KubeRDE is a lightweight, production-ready platform for managing remote developm
 
 - **🔐 Secure by Default**
   - OIDC/OAuth2 authentication with Keycloak
-  - Multi-tenant isolation with Kubernetes namespaces
+  - **Team-based Multi-tenancy**: Shared control plane with isolated team namespaces
   - JWT-based authorization for all connections
   - Audit logging for compliance
 

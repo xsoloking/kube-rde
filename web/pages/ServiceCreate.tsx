@@ -228,7 +228,7 @@ const ServiceCreate: React.FC = () => {
     <div className="p-8 lg:px-12 lg:py-6 max-w-[1000px] mx-auto w-full animate-fade-in space-y-8">
       {/* Breadcrumbs */}
       <nav className="flex items-center gap-3 text-xs font-medium">
-        <Link to="/workspaces" className="text-text-secondary hover:text-white transition-colors">
+        <Link to="/workspaces" className="text-text-secondary hover:text-text-foreground transition-colors">
           Workspaces
         </Link>
         <span className="material-symbols-outlined text-[14px] text-text-secondary">
@@ -238,7 +238,7 @@ const ServiceCreate: React.FC = () => {
           <>
             <Link
               to={`/workspaces/${workspaceId}`}
-              className="text-text-secondary hover:text-white transition-colors truncate"
+              className="text-text-secondary hover:text-text-foreground transition-colors truncate"
             >
               {workspaceId}
             </Link>
@@ -247,7 +247,7 @@ const ServiceCreate: React.FC = () => {
             </span>
           </>
         )}
-        <span className="text-white">New Service</span>
+        <span className="text-text-foreground">New Service</span>
       </nav>
 
       {/* Header */}
@@ -266,7 +266,7 @@ const ServiceCreate: React.FC = () => {
         <div className="flex items-center gap-4">
           <button
             onClick={() => (selectedTemplate ? setSelectedTemplate(null) : navigate(-1))}
-            className="px-6 py-2.5 text-text-secondary hover:text-white font-bold text-xs uppercase tracking-widest transition-all"
+            className="px-6 py-2.5 text-text-secondary hover:text-text-foreground font-bold text-xs uppercase tracking-widest transition-all"
             disabled={loading}
           >
             {selectedTemplate ? 'Back' : 'Cancel'}
@@ -299,7 +299,7 @@ const ServiceCreate: React.FC = () => {
             <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center text-primary">
               <span className="material-symbols-outlined text-[20px]">category</span>
             </div>
-            <h2 className="text-lg font-bold text-white">Select Agent Type</h2>
+            <h2 className="text-lg font-bold text-text-foreground">Select Agent Type</h2>
           </div>
 
           {templatesLoading ? (
@@ -322,7 +322,7 @@ const ServiceCreate: React.FC = () => {
                       </span>
                     </div>
                     <div className="flex-1">
-                      <h3 className="text-base font-bold text-white mb-1">{template.name}</h3>
+                      <h3 className="text-base font-bold text-text-foreground mb-1">{template.name}</h3>
                       <p className="text-xs text-text-secondary line-clamp-2">
                         {template.description || 'No description'}
                       </p>
@@ -365,7 +365,7 @@ const ServiceCreate: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => setShowSshKeyForm(true)}
-                        className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-bold text-xs uppercase tracking-widest transition-all flex items-center gap-2 shadow-lg shadow-amber-500/20"
+                        className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-text-foreground rounded-lg font-bold text-xs uppercase tracking-widest transition-all flex items-center gap-2 shadow-lg shadow-amber-500/20"
                       >
                         <span className="material-symbols-outlined text-[18px]">key</span>
                         Add SSH Key Now
@@ -373,7 +373,7 @@ const ServiceCreate: React.FC = () => {
                     ) : (
                       <div className="bg-background-dark/50 rounded-xl border border-amber-500/20 p-6 space-y-4 animate-fade-in">
                         <div className="flex items-center justify-between mb-4 pb-3 border-b border-amber-500/20">
-                          <h4 className="text-sm font-bold text-white">Add Your SSH Public Key</h4>
+                          <h4 className="text-sm font-bold text-text-foreground">Add Your SSH Public Key</h4>
                           <button
                             type="button"
                             onClick={() => {
@@ -382,7 +382,7 @@ const ServiceCreate: React.FC = () => {
                               setSshKeyPublic('');
                               setError(null);
                             }}
-                            className="text-text-secondary hover:text-white transition-colors"
+                            className="text-text-secondary hover:text-text-foreground transition-colors"
                           >
                             <span className="material-symbols-outlined text-[20px]">close</span>
                           </button>
@@ -397,7 +397,7 @@ const ServiceCreate: React.FC = () => {
                             value={sshKeyName}
                             onChange={(e) => setSshKeyName(e.target.value)}
                             placeholder="e.g., My MacBook Pro"
-                            className="w-full bg-background-dark border border-border-dark rounded-lg h-11 px-4 text-white focus:ring-1 focus:ring-amber-500 focus:border-amber-500 placeholder:text-text-secondary/30 transition-all text-sm"
+                            className="w-full bg-background-dark border border-border-dark rounded-lg h-11 px-4 text-text-foreground focus:ring-1 focus:ring-amber-500 focus:border-amber-500 placeholder:text-text-secondary/30 transition-all text-sm"
                             disabled={addingSshKey}
                           />
                         </div>
@@ -411,7 +411,7 @@ const ServiceCreate: React.FC = () => {
                             onChange={(e) => setSshKeyPublic(e.target.value)}
                             placeholder="ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ... user@hostname"
                             rows={4}
-                            className="w-full bg-background-dark border border-border-dark rounded-lg p-3 text-white focus:ring-1 focus:ring-amber-500 focus:border-amber-500 placeholder:text-text-secondary/30 transition-all text-xs font-mono resize-none"
+                            className="w-full bg-background-dark border border-border-dark rounded-lg p-3 text-text-foreground focus:ring-1 focus:ring-amber-500 focus:border-amber-500 placeholder:text-text-secondary/30 transition-all text-xs font-mono resize-none"
                             disabled={addingSshKey}
                           />
                           <p className="text-[10px] text-text-secondary font-medium">
@@ -431,7 +431,7 @@ const ServiceCreate: React.FC = () => {
                             type="button"
                             onClick={handleAddSshKey}
                             disabled={addingSshKey || !sshKeyName.trim() || !sshKeyPublic.trim()}
-                            className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold text-xs uppercase tracking-widest transition-all flex items-center gap-2 shadow-lg shadow-amber-500/20"
+                            className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed text-text-foreground rounded-lg font-bold text-xs uppercase tracking-widest transition-all flex items-center gap-2 shadow-lg shadow-amber-500/20"
                           >
                             {addingSshKey ? (
                               <>
@@ -454,7 +454,7 @@ const ServiceCreate: React.FC = () => {
                               setError(null);
                             }}
                             disabled={addingSshKey}
-                            className="px-5 py-2.5 text-text-secondary hover:text-white font-bold text-xs uppercase tracking-widest transition-all disabled:opacity-50"
+                            className="px-5 py-2.5 text-text-secondary hover:text-text-foreground font-bold text-xs uppercase tracking-widest transition-all disabled:opacity-50"
                           >
                             Cancel
                           </button>
@@ -496,7 +496,7 @@ const ServiceCreate: React.FC = () => {
               <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center text-primary">
                 <span className="material-symbols-outlined text-[20px]">memory</span>
               </div>
-              <h3 className="text-base font-bold text-white">Compute Resources</h3>
+              <h3 className="text-base font-bold text-text-foreground">Compute Resources</h3>
             </div>
 
             <div className="space-y-8">
@@ -606,7 +606,7 @@ const ServiceCreate: React.FC = () => {
                       <span className="material-symbols-outlined text-xl">developer_board</span>
                     </div>
                     <div>
-                      <h4 className="font-bold text-base text-white">Enable GPU Acceleration</h4>
+                      <h4 className="font-bold text-base text-text-foreground">Enable GPU Acceleration</h4>
                       <p className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">
                         Required for complex model training
                       </p>
@@ -631,7 +631,7 @@ const ServiceCreate: React.FC = () => {
                         GPU Model
                       </label>
                       <select
-                        className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-white focus:ring-1 focus:ring-primary focus:border-primary transition-all text-sm"
+                        className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-text-foreground focus:ring-1 focus:ring-primary focus:border-primary transition-all text-sm"
                         value={selectedGpuQuota?.model_name || ''}
                         onChange={(e) => {
                           const modelName = e.target.value;
@@ -660,12 +660,12 @@ const ServiceCreate: React.FC = () => {
                           type="button"
                           onClick={() => setGpuCount(Math.max(1, gpuCount - 1))}
                           disabled={loading || gpuCount <= 1}
-                          className="size-8 flex items-center justify-center text-text-secondary hover:text-white hover:bg-white/5 rounded-lg transition-all disabled:opacity-30"
+                          className="size-8 flex items-center justify-center text-text-secondary hover:text-text-foreground hover:bg-surface-highlight rounded-lg transition-all disabled:opacity-30"
                         >
                           <span className="material-symbols-outlined text-sm">remove</span>
                         </button>
                         <input
-                          className="flex-1 bg-transparent text-center text-white font-mono font-bold border-none focus:ring-0 text-base"
+                          className="flex-1 bg-transparent text-center text-text-foreground font-mono font-bold border-none focus:ring-0 text-base"
                           type="text"
                           readOnly
                           value={gpuCount}
@@ -681,7 +681,7 @@ const ServiceCreate: React.FC = () => {
                             !selectedGpuQuota ||
                             gpuCount >= (selectedGpuQuota?.limit || 0)
                           }
-                          className="size-8 flex items-center justify-center text-text-secondary hover:text-white hover:bg-white/5 rounded-lg transition-all disabled:opacity-30"
+                          className="size-8 flex items-center justify-center text-text-secondary hover:text-text-foreground hover:bg-surface-highlight rounded-lg transition-all disabled:opacity-30"
                         >
                           <span className="material-symbols-outlined text-sm">add</span>
                         </button>
@@ -703,7 +703,7 @@ const ServiceCreate: React.FC = () => {
                     <span className="material-symbols-outlined text-xl">schedule</span>
                   </div>
                   <div className="flex-1">
-                    <h4 className="font-bold text-base text-white">Idle Timeout (TTL)</h4>
+                    <h4 className="font-bold text-base text-text-foreground">Idle Timeout (TTL)</h4>
                     <p className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">
                       Auto-stop after inactivity period
                     </p>
@@ -716,7 +716,7 @@ const ServiceCreate: React.FC = () => {
                       Timeout Duration
                     </label>
                     <input
-                      className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-white focus:ring-1 focus:ring-primary focus:border-primary transition-all text-sm font-mono"
+                      className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-text-foreground focus:ring-1 focus:ring-primary focus:border-primary transition-all text-sm font-mono"
                       type="text"
                       value={ttl}
                       onChange={(e) => setTtl(e.target.value)}
@@ -798,7 +798,7 @@ const ServiceCreate: React.FC = () => {
               <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center text-primary">
                 <span className="material-symbols-outlined text-[20px]">settings</span>
               </div>
-              <h3 className="text-base font-bold text-white flex-1 text-left">
+              <h3 className="text-base font-bold text-text-foreground flex-1 text-left">
                 Advanced Options (Optional)
               </h3>
               <span
@@ -815,7 +815,7 @@ const ServiceCreate: React.FC = () => {
                     Startup Arguments
                   </label>
                   <textarea
-                    className="w-full bg-background-dark border border-border-dark rounded-xl p-4 text-white focus:ring-1 focus:ring-primary focus:border-primary placeholder:text-text-secondary/30 transition-all text-sm font-mono"
+                    className="w-full bg-background-dark border border-border-dark rounded-xl p-4 text-text-foreground focus:ring-1 focus:ring-primary focus:border-primary placeholder:text-text-secondary/30 transition-all text-sm font-mono"
                     placeholder={selectedTemplate.startup_args || '(none)'}
                     rows={3}
                     value={startupArgs}
@@ -832,7 +832,7 @@ const ServiceCreate: React.FC = () => {
                     Environment Variables (JSON)
                   </label>
                   <textarea
-                    className="w-full bg-background-dark border border-border-dark rounded-xl p-4 text-white focus:ring-1 focus:ring-primary focus:border-primary placeholder:text-text-secondary/30 transition-all text-sm font-mono"
+                    className="w-full bg-background-dark border border-border-dark rounded-xl p-4 text-text-foreground focus:ring-1 focus:ring-primary focus:border-primary placeholder:text-text-secondary/30 transition-all text-sm font-mono"
                     placeholder='e.g., {"KEY": "value"}'
                     rows={3}
                     value={JSON.stringify(envVars, null, 2)}

@@ -31,17 +31,17 @@ const Login: React.FC = () => {
         <div className="text-center mb-8">
           <div className="flex items-center justify-center mb-6">
             <div className="size-20 rounded-2xl bg-gradient-to-br from-primary to-primary-dark flex items-center justify-center shadow-xl shadow-primary/20">
-              <span className="material-symbols-outlined text-white text-5xl">deployed_code</span>
+              <span className="material-symbols-outlined text-text-foreground text-5xl">deployed_code</span>
             </div>
           </div>
-          <h1 className="text-4xl font-bold text-white mb-2">KubeRDE</h1>
+          <h1 className="text-4xl font-bold text-text-foreground mb-2">KubeRDE</h1>
           <p className="text-text-secondary text-lg">Remote Development Environment</p>
         </div>
 
         {/* Login Card */}
         <div className="bg-surface-dark border border-border-dark rounded-2xl shadow-2xl p-8">
           <div className="mb-6">
-            <h2 className="text-2xl font-bold text-white mb-2">Welcome Back</h2>
+            <h2 className="text-2xl font-bold text-text-foreground mb-2">Welcome Back</h2>
             <p className="text-text-secondary">Sign in to access your development workspace</p>
           </div>
 

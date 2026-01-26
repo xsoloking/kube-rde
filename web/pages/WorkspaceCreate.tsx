@@ -108,17 +108,17 @@ const WorkspaceCreate: React.FC = () => {
             <div className="flex items-center gap-3">
               <Link
                 to="/workspaces"
-                className="text-text-secondary hover:text-white transition-colors text-[10px] font-bold uppercase tracking-widest"
+                className="text-text-secondary hover:text-text-foreground transition-colors text-[10px] font-bold uppercase tracking-widest"
               >
                 ← Workspaces
               </Link>
               <span className="text-text-secondary">/</span>
-              <h1 className="text-2xl font-bold tracking-tight text-white">New Workspace</h1>
+              <h1 className="text-2xl font-bold tracking-tight text-text-foreground">New Workspace</h1>
             </div>
             <div className="flex items-center gap-3">
               <button
                 onClick={() => navigate(-1)}
-                className="px-4 py-2 text-text-secondary hover:text-white font-bold text-[10px] uppercase tracking-widest transition-all"
+                className="px-4 py-2 text-text-secondary hover:text-text-foreground font-bold text-[10px] uppercase tracking-widest transition-all"
                 disabled={loading}
               >
                 Cancel
@@ -148,7 +148,7 @@ const WorkspaceCreate: React.FC = () => {
               <div className="bg-surface-dark rounded-xl border border-border-dark p-5 shadow-xl flex-1 flex flex-col">
                 <div className="flex items-center gap-2 pb-3 border-b border-border-dark/50 mb-4">
                   <span className="material-symbols-outlined text-primary text-[18px]">badge</span>
-                  <h3 className="text-sm font-bold text-white">General Information</h3>
+                  <h3 className="text-sm font-bold text-text-foreground">General Information</h3>
                 </div>
 
                 <div className="space-y-3 flex-1 flex flex-col">
@@ -157,7 +157,7 @@ const WorkspaceCreate: React.FC = () => {
                       Workspace Name <span className="text-red-500">*</span>
                     </label>
                     <input
-                      className="w-full bg-background-dark border border-border-dark rounded-lg h-9 px-3 text-white focus:ring-1 focus:ring-primary focus:border-primary placeholder:text-text-secondary/30 transition-all text-sm"
+                      className="w-full bg-background-dark border border-border-dark rounded-lg h-9 px-3 text-text-foreground focus:ring-1 focus:ring-primary focus:border-primary placeholder:text-text-secondary/30 transition-all text-sm"
                       placeholder="e.g., production-env"
                       type="text"
                       value={name}
@@ -171,7 +171,7 @@ const WorkspaceCreate: React.FC = () => {
                       Description <span className="text-slate-500 font-normal">(Optional)</span>
                     </label>
                     <textarea
-                      className="w-full bg-background-dark border border-border-dark rounded-lg p-3 text-white focus:ring-1 focus:ring-primary focus:border-primary outline-none placeholder:text-text-secondary/30 text-sm leading-relaxed resize-none h-full"
+                      className="w-full bg-background-dark border border-border-dark rounded-lg p-3 text-text-foreground focus:ring-1 focus:ring-primary focus:border-primary outline-none placeholder:text-text-secondary/30 text-sm leading-relaxed resize-none h-full"
                       placeholder="Describe the purpose..."
                       value={description}
                       onChange={(e) => setDescription(e.target.value)}
@@ -185,7 +185,7 @@ const WorkspaceCreate: React.FC = () => {
               <div className="bg-surface-dark rounded-xl border border-border-dark p-5 shadow-xl">
                 <div className="flex items-center gap-2 pb-3 border-b border-border-dark/50 mb-4">
                   <span className="material-symbols-outlined text-primary text-[18px]">storage</span>
-                  <h3 className="text-sm font-bold text-white">Storage Configuration</h3>
+                  <h3 className="text-sm font-bold text-text-foreground">Storage Configuration</h3>
                 </div>
 
                 <div className="space-y-3">
@@ -194,7 +194,7 @@ const WorkspaceCreate: React.FC = () => {
                       Storage Class <span className="text-red-500">*</span>
                     </label>
                     <select
-                      className="w-full bg-background-dark border border-border-dark rounded-lg h-9 px-3 text-white focus:ring-1 focus:ring-primary focus:border-primary transition-all text-sm cursor-pointer"
+                      className="w-full bg-background-dark border border-border-dark rounded-lg h-9 px-3 text-text-foreground focus:ring-1 focus:ring-primary focus:border-primary transition-all text-sm cursor-pointer"
                       value={storageClass}
                       onChange={(e) => {
                         setStorageClass(e.target.value);

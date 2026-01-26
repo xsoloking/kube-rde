@@ -24,7 +24,7 @@ const Help: React.FC = () => {
     <div className="flex h-full animate-fade-in">
       {/* Sidebar Navigation */}
       <div className="w-64 bg-surface-dark border-r border-border-dark p-6 flex-shrink-0 overflow-y-auto hidden lg:block">
-        <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+        <h2 className="text-xl font-bold text-text-foreground mb-6 flex items-center gap-2">
           <span className="material-symbols-outlined text-primary">menu_book</span>
           Documentation
         </h2>
@@ -36,7 +36,7 @@ const Help: React.FC = () => {
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 text-sm font-medium ${
                 activeSection === section.id
                   ? 'bg-primary/10 text-primary border border-primary/20'
-                  : 'text-text-secondary hover:text-white hover:bg-white/5'
+                  : 'text-text-secondary hover:text-text-foreground hover:bg-surface-highlight'
               }`}
             >
               <span className="material-symbols-outlined text-[20px]">{section.icon}</span>
@@ -50,7 +50,7 @@ const Help: React.FC = () => {
       <div className="flex-1 overflow-y-auto p-8 lg:p-12 scroll-smooth">
         <div className="max-w-4xl mx-auto space-y-12 pb-24">
           <div className="flex flex-col gap-2 border-b border-border-dark pb-8">
-            <h1 className="text-4xl font-bold tracking-tight text-white">Help Center</h1>
+            <h1 className="text-4xl font-bold tracking-tight text-text-foreground">Help Center</h1>
             <p className="text-text-secondary text-lg">
               Guides, references, and troubleshooting for the KubeRDE platform.
             </p>
@@ -62,11 +62,11 @@ const Help: React.FC = () => {
               <div className="size-10 rounded-lg bg-primary/20 flex items-center justify-center text-primary">
                 <span className="material-symbols-outlined text-2xl">rocket_launch</span>
               </div>
-              <h2 className="text-2xl font-bold text-white">Getting Started</h2>
+              <h2 className="text-2xl font-bold text-text-foreground">Getting Started</h2>
             </div>
 
             <div className="bg-surface-dark border border-border-dark rounded-xl p-6 space-y-4">
-              <h3 className="text-lg font-bold text-white">1. Create a Workspace</h3>
+              <h3 className="text-lg font-bold text-text-foreground">1. Create a Workspace</h3>
               <p className="text-text-secondary">
                 A <strong>Workspace</strong> is your project folder. It holds your persistent
                 storage (PVC) and groups your services. Go to the{' '}
@@ -78,21 +78,21 @@ const Help: React.FC = () => {
             </div>
 
             <div className="bg-surface-dark border border-border-dark rounded-xl p-6 space-y-4">
-              <h3 className="text-lg font-bold text-white">2. Launch a Service</h3>
+              <h3 className="text-lg font-bold text-text-foreground">2. Launch a Service</h3>
               <p className="text-text-secondary">
                 Inside your workspace, click "Create Service". Choose a template:
               </p>
               <ul className="list-disc list-inside text-text-secondary space-y-2 ml-2">
                 <li>
-                  <strong className="text-white">SSH Server:</strong> Standard Linux environment.
+                  <strong className="text-text-foreground">SSH Server:</strong> Standard Linux environment.
                   Best for VS Code Remote.
                 </li>
                 <li>
-                  <strong className="text-white">Code Server:</strong> VS Code running in your
+                  <strong className="text-text-foreground">Code Server:</strong> VS Code running in your
                   browser.
                 </li>
                 <li>
-                  <strong className="text-white">Jupyter:</strong> Python data science environment.
+                  <strong className="text-text-foreground">Jupyter:</strong> Python data science environment.
                 </li>
               </ul>
             </div>
@@ -104,11 +104,11 @@ const Help: React.FC = () => {
               <div className="size-10 rounded-lg bg-emerald-500/20 flex items-center justify-center text-emerald-500">
                 <span className="material-symbols-outlined text-2xl">cable</span>
               </div>
-              <h2 className="text-2xl font-bold text-white">Connectivity</h2>
+              <h2 className="text-2xl font-bold text-text-foreground">Connectivity</h2>
             </div>
 
             <div className="bg-surface-dark border border-border-dark rounded-xl p-6 space-y-4">
-              <h3 className="text-lg font-bold text-white">Step 1: Download CLI</h3>
+              <h3 className="text-lg font-bold text-text-foreground">Step 1: Download CLI</h3>
               <p className="text-text-secondary">
                 You need the <code>kuberde-cli</code> to authenticate and proxy connections.
               </p>
@@ -141,7 +141,7 @@ const Help: React.FC = () => {
             </div>
 
             <div className="bg-surface-dark border border-border-dark rounded-xl p-6 space-y-4">
-              <h3 className="text-lg font-bold text-white">Step 2: Login via CLI</h3>
+              <h3 className="text-lg font-bold text-text-foreground">Step 2: Login via CLI</h3>
               <div className="bg-black/30 p-4 rounded-lg border border-border-dark">
                 <code className="text-emerald-400 font-mono text-sm block">
                   ./kuberde-cli login --issuer https://sso.byai.uk/realms/kuberde
@@ -150,7 +150,7 @@ const Help: React.FC = () => {
             </div>
 
             <div className="bg-surface-dark border border-border-dark rounded-xl p-6 space-y-4">
-              <h3 className="text-lg font-bold text-white">Step 3: Connect via SSH</h3>
+              <h3 className="text-lg font-bold text-text-foreground">Step 3: Connect via SSH</h3>
               <p className="text-text-secondary">
                 Add this to your <code>~/.ssh/config</code> file:
               </p>
@@ -176,12 +176,12 @@ const Help: React.FC = () => {
               <div className="size-10 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-500">
                 <span className="material-symbols-outlined text-2xl">school</span>
               </div>
-              <h2 className="text-2xl font-bold text-white">Core Concepts</h2>
+              <h2 className="text-2xl font-bold text-text-foreground">Core Concepts</h2>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="bg-surface-dark border border-border-dark rounded-xl p-6">
-                <h3 className="font-bold text-white mb-2 flex items-center gap-2">
+                <h3 className="font-bold text-text-foreground mb-2 flex items-center gap-2">
                   <span className="material-symbols-outlined text-primary">folder</span>
                   Workspace
                 </h3>
@@ -193,7 +193,7 @@ const Help: React.FC = () => {
                 </p>
               </div>
               <div className="bg-surface-dark border border-border-dark rounded-xl p-6">
-                <h3 className="font-bold text-white mb-2 flex items-center gap-2">
+                <h3 className="font-bold text-text-foreground mb-2 flex items-center gap-2">
                   <span className="material-symbols-outlined text-purple-500">deployed_code</span>
                   Service (Agent)
                 </h3>
@@ -213,11 +213,11 @@ const Help: React.FC = () => {
               <div className="size-10 rounded-lg bg-orange-500/20 flex items-center justify-center text-orange-500">
                 <span className="material-symbols-outlined text-2xl">memory</span>
               </div>
-              <h2 className="text-2xl font-bold text-white">Resources & GPU</h2>
+              <h2 className="text-2xl font-bold text-text-foreground">Resources & GPU</h2>
             </div>
 
             <div className="bg-surface-dark border border-border-dark rounded-xl p-6 space-y-4">
-              <h3 className="text-lg font-bold text-white">Resource Quotas</h3>
+              <h3 className="text-lg font-bold text-text-foreground">Resource Quotas</h3>
               <p className="text-text-secondary">
                 Each user has a global quota for CPU cores, Memory (GiB), and GPUs. You cannot
                 create new services if you exceed your allocated quota. Stop unused services to free
@@ -226,7 +226,7 @@ const Help: React.FC = () => {
             </div>
 
             <div className="bg-surface-dark border border-border-dark rounded-xl p-6 space-y-4">
-              <h3 className="text-lg font-bold text-white">Auto-Scaling (TTL)</h3>
+              <h3 className="text-lg font-bold text-text-foreground">Auto-Scaling (TTL)</h3>
               <p className="text-text-secondary">
                 To save resources, services have a <strong>Time To Live (TTL)</strong> setting
                 (e.g., 8 hours). If no active connection (SSH or Web) is detected for the TTL
@@ -242,12 +242,12 @@ const Help: React.FC = () => {
               <div className="size-10 rounded-lg bg-gray-500/20 flex items-center justify-center text-gray-400">
                 <span className="material-symbols-outlined text-2xl">help</span>
               </div>
-              <h2 className="text-2xl font-bold text-white">FAQ</h2>
+              <h2 className="text-2xl font-bold text-text-foreground">FAQ</h2>
             </div>
 
             <div className="space-y-4">
               <details className="group bg-surface-dark border border-border-dark rounded-xl open:border-primary/50 transition-all">
-                <summary className="flex items-center justify-between p-6 cursor-pointer font-bold text-white">
+                <summary className="flex items-center justify-between p-6 cursor-pointer font-bold text-text-foreground">
                   Why is my service status "Pending"?
                   <span className="material-symbols-outlined group-open:rotate-180 transition-transform">
                     expand_more
@@ -261,7 +261,7 @@ const Help: React.FC = () => {
               </details>
 
               <details className="group bg-surface-dark border border-border-dark rounded-xl open:border-primary/50 transition-all">
-                <summary className="flex items-center justify-between p-6 cursor-pointer font-bold text-white">
+                <summary className="flex items-center justify-between p-6 cursor-pointer font-bold text-text-foreground">
                   I lost my files! Where are they?
                   <span className="material-symbols-outlined group-open:rotate-180 transition-transform">
                     expand_more
@@ -276,7 +276,7 @@ const Help: React.FC = () => {
               </details>
 
               <details className="group bg-surface-dark border border-border-dark rounded-xl open:border-primary/50 transition-all">
-                <summary className="flex items-center justify-between p-6 cursor-pointer font-bold text-white">
+                <summary className="flex items-center justify-between p-6 cursor-pointer font-bold text-text-foreground">
                   How do I reset my environment?
                   <span className="material-symbols-outlined group-open:rotate-180 transition-transform">
                     expand_more

@@ -40,7 +40,7 @@ const JsonEditor: React.FC<{ label: string; value: unknown; onChange: (val: unkn
       <textarea
         value={text}
         onChange={handleChange}
-        className={`w-full px-4 py-3 bg-background-dark border rounded-lg text-white font-mono text-sm focus:outline-none transition-colors resize-none ${
+        className={`w-full px-4 py-3 bg-background-dark border rounded-lg text-text-foreground font-mono text-sm focus:outline-none transition-colors resize-none ${
           error ? 'border-red-500 focus:border-red-500' : 'border-border-dark focus:border-primary'
         }`}
         rows={5}
@@ -301,7 +301,7 @@ const AgentTemplates: React.FC = () => {
         <div className="flex items-center gap-3">
           <button
             onClick={handleExportAll}
-            className="flex items-center gap-2 bg-surface-dark hover:bg-surface-highlight text-white border border-border-dark px-4 py-3 rounded-xl font-bold transition-all active:scale-95"
+            className="flex items-center gap-2 bg-surface-dark hover:bg-surface-highlight text-text-foreground border border-border-dark px-4 py-3 rounded-xl font-bold transition-all active:scale-95"
             title="Export all templates"
           >
             <span className="material-symbols-outlined text-[20px]">download</span>
@@ -309,7 +309,7 @@ const AgentTemplates: React.FC = () => {
           </button>
           <button
             onClick={() => setIsImportModalOpen(true)}
-            className="flex items-center gap-2 bg-surface-dark hover:bg-surface-highlight text-white border border-border-dark px-4 py-3 rounded-xl font-bold transition-all active:scale-95"
+            className="flex items-center gap-2 bg-surface-dark hover:bg-surface-highlight text-text-foreground border border-border-dark px-4 py-3 rounded-xl font-bold transition-all active:scale-95"
             title="Import templates"
           >
             <span className="material-symbols-outlined text-[20px]">upload</span>
@@ -413,16 +413,16 @@ const AgentTemplates: React.FC = () => {
                   const isBuiltIn = isBuiltInTemplate(template.id);
 
                   return (
-                    <tr key={template.id} className="hover:bg-white/5 transition-colors group">
+                    <tr key={template.id} className="hover:bg-surface-highlight transition-colors group">
                       <td className="p-5">
                         <div className="flex items-center gap-3">
-                          <div className="size-10 rounded-lg bg-surface-dark flex items-center justify-center border border-white/5">
+                          <div className="size-10 rounded-lg bg-surface-dark flex items-center justify-center border border-border-dark">
                             <span className="material-symbols-outlined text-[20px] text-primary">
                               {getAgentTypeIcon(template.agent_type)}
                             </span>
                           </div>
                           <div>
-                            <p className="font-bold text-white text-sm">{template.name}</p>
+                            <p className="font-bold text-text-foreground text-sm">{template.name}</p>
                             <p className="text-[10px] text-text-secondary opacity-60 font-mono">
                               {template.id}
                             </p>
@@ -535,7 +535,7 @@ const AgentTemplates: React.FC = () => {
               </div>
               <button
                 onClick={() => setIsEditModalOpen(false)}
-                className="text-text-secondary hover:text-white transition-colors p-2 rounded-lg hover:bg-white/10"
+                className="text-text-secondary hover:text-text-foreground transition-colors p-2 rounded-lg hover:bg-white/10"
               >
                 <span className="material-symbols-outlined text-[24px]">close</span>
               </button>
@@ -552,7 +552,7 @@ const AgentTemplates: React.FC = () => {
                   type="text"
                   value={editingTemplate.name}
                   onChange={(e) => setEditingTemplate({ ...editingTemplate, name: e.target.value })}
-                  className="w-full px-4 py-3 bg-background-dark border border-border-dark rounded-lg text-white focus:outline-none focus:border-primary transition-colors"
+                  className="w-full px-4 py-3 bg-background-dark border border-border-dark rounded-lg text-text-foreground focus:outline-none focus:border-primary transition-colors"
                   placeholder="Template name"
                 />
               </div>
@@ -568,7 +568,7 @@ const AgentTemplates: React.FC = () => {
                     onChange={(e) =>
                       setEditingTemplate({ ...editingTemplate, agent_type: e.target.value })
                     }
-                    className="w-full px-4 py-3 bg-background-dark border border-border-dark rounded-lg text-white focus:outline-none focus:border-primary transition-colors appearance-none cursor-pointer"
+                    className="w-full px-4 py-3 bg-background-dark border border-border-dark rounded-lg text-text-foreground focus:outline-none focus:border-primary transition-colors appearance-none cursor-pointer"
                     disabled={!!editingTemplate.id && isBuiltInTemplate(editingTemplate.id)}
                   >
                     <option value="web">Web Service (Generic)</option>
@@ -593,7 +593,7 @@ const AgentTemplates: React.FC = () => {
                   onChange={(e) =>
                     setEditingTemplate({ ...editingTemplate, description: e.target.value })
                   }
-                  className="w-full px-4 py-3 bg-background-dark border border-border-dark rounded-lg text-white focus:outline-none focus:border-primary transition-colors resize-none"
+                  className="w-full px-4 py-3 bg-background-dark border border-border-dark rounded-lg text-text-foreground focus:outline-none focus:border-primary transition-colors resize-none"
                   rows={3}
                   placeholder="Template description"
                 />
@@ -610,7 +610,7 @@ const AgentTemplates: React.FC = () => {
                   onChange={(e) =>
                     setEditingTemplate({ ...editingTemplate, docker_image: e.target.value })
                   }
-                  className="w-full px-4 py-3 bg-background-dark border border-border-dark rounded-lg text-white font-mono text-sm focus:outline-none focus:border-primary transition-colors"
+                  className="w-full px-4 py-3 bg-background-dark border border-border-dark rounded-lg text-text-foreground font-mono text-sm focus:outline-none focus:border-primary transition-colors"
                   placeholder="e.g., ubuntu:22.04"
                 />
               </div>
@@ -626,7 +626,7 @@ const AgentTemplates: React.FC = () => {
                   onChange={(e) =>
                     setEditingTemplate({ ...editingTemplate, default_local_target: e.target.value })
                   }
-                  className="w-full px-4 py-3 bg-background-dark border border-border-dark rounded-lg text-white font-mono text-sm focus:outline-none focus:border-primary transition-colors"
+                  className="w-full px-4 py-3 bg-background-dark border border-border-dark rounded-lg text-text-foreground font-mono text-sm focus:outline-none focus:border-primary transition-colors"
                   placeholder="e.g., localhost:22"
                 />
               </div>
@@ -645,7 +645,7 @@ const AgentTemplates: React.FC = () => {
                       default_external_port: parseInt(e.target.value) || 0,
                     })
                   }
-                  className="w-full px-4 py-3 bg-background-dark border border-border-dark rounded-lg text-white focus:outline-none focus:border-primary transition-colors"
+                  className="w-full px-4 py-3 bg-background-dark border border-border-dark rounded-lg text-text-foreground focus:outline-none focus:border-primary transition-colors"
                   placeholder="e.g., 22"
                   min="1"
                   max="65535"
@@ -663,7 +663,7 @@ const AgentTemplates: React.FC = () => {
                   onChange={(e) =>
                     setEditingTemplate({ ...editingTemplate, startup_args: e.target.value })
                   }
-                  className="w-full px-4 py-3 bg-background-dark border border-border-dark rounded-lg text-white font-mono text-sm focus:outline-none focus:border-primary transition-colors"
+                  className="w-full px-4 py-3 bg-background-dark border border-border-dark rounded-lg text-text-foreground font-mono text-sm focus:outline-none focus:border-primary transition-colors"
                   placeholder="e.g., /usr/sbin/sshd -D"
                 />
               </div>
@@ -712,7 +712,7 @@ const AgentTemplates: React.FC = () => {
             <div className="sticky bottom-0 bg-surface-dark border-t border-border-dark p-6 flex items-center justify-end gap-3">
               <button
                 onClick={() => setIsEditModalOpen(false)}
-                className="px-6 py-2.5 bg-surface-highlight hover:bg-white/10 text-white text-sm font-bold uppercase tracking-widest rounded-lg border border-border-dark transition-all"
+                className="px-6 py-2.5 bg-surface-highlight hover:bg-white/10 text-text-foreground text-sm font-bold uppercase tracking-widest rounded-lg border border-border-dark transition-all"
               >
                 Cancel
               </button>
@@ -739,7 +739,7 @@ const AgentTemplates: React.FC = () => {
                   setImportFile(null);
                   setImportResult(null);
                 }}
-                className="text-text-secondary hover:text-white p-2 rounded-lg hover:bg-white/10 transition-all"
+                className="text-text-secondary hover:text-text-foreground p-2 rounded-lg hover:bg-white/10 transition-all"
               >
                 <span className="material-symbols-outlined text-[24px]">close</span>
               </button>
@@ -786,7 +786,7 @@ const AgentTemplates: React.FC = () => {
                     setImportFile(null);
                     setImportResult(null);
                   }}
-                  className="flex-1 px-4 py-2.5 bg-surface-highlight hover:bg-white/10 text-white text-sm font-bold uppercase tracking-widest rounded-lg border border-border-dark transition-all"
+                  className="flex-1 px-4 py-2.5 bg-surface-highlight hover:bg-white/10 text-text-foreground text-sm font-bold uppercase tracking-widest rounded-lg border border-border-dark transition-all"
                 >
                   Cancel
                 </button>

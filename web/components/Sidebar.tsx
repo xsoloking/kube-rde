@@ -9,11 +9,10 @@ const NavItem: React.FC<{ to: string; icon: string; label: string }> = ({ to, ic
   return (
     <Link
       to={to}
-      className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 group ${
-        isActive
-          ? 'bg-surface-highlight text-white shadow-sm border border-white/5'
-          : 'text-text-secondary hover:bg-white/5 hover:text-white'
-      }`}
+      className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 group ${isActive
+          ? 'bg-surface-highlight text-text-foreground shadow-sm border border-border-dark'
+          : 'text-text-secondary hover:bg-surface-highlight hover:text-text-foreground'
+        }`}
     >
       <span
         className={`material-symbols-outlined ${isActive ? 'text-primary icon-fill' : 'group-hover:text-primary'}`}
@@ -32,13 +31,13 @@ const Sidebar: React.FC = () => {
   const isAdmin = user?.roles?.includes('admin') || false;
 
   return (
-    <aside className="w-64 h-full hidden lg:flex flex-col border-r border-border-dark bg-[#0f1824] shrink-0">
+    <aside className="w-64 h-full hidden lg:flex flex-col border-r border-border-dark bg-background-dark shrink-0">
       <div className="p-6 flex items-center gap-3">
         <div className="size-10 rounded-full bg-primary flex items-center justify-center shadow-lg shadow-primary/20">
-          <span className="material-symbols-outlined text-white text-2xl">deployed_code</span>
+          <span className="material-symbols-outlined text-text-foreground text-2xl">deployed_code</span>
         </div>
         <div className="flex flex-col">
-          <h1 className="text-white text-lg font-bold leading-none tracking-tight">KubeRDE</h1>
+          <h1 className="text-text-foreground text-lg font-bold leading-none tracking-tight">KubeRDE</h1>
           <p className="text-text-secondary text-[10px] font-normal uppercase tracking-widest mt-1">
             AI Platform
           </p>
@@ -70,14 +69,14 @@ const Sidebar: React.FC = () => {
         {/* User Card - Click to view profile */}
         <Link
           to={`/users/${user?.id}`}
-          className="flex items-center gap-3 p-3 rounded-2xl bg-surface-dark border border-white/5 hover:bg-surface-highlight hover:border-primary/30 transition-all cursor-pointer select-none group"
+          className="flex items-center gap-3 p-3 rounded-2xl bg-surface-dark border border-border-dark hover:bg-surface-highlight hover:border-primary/30 transition-all cursor-pointer select-none group"
           title="View Profile"
         >
-          <div className="size-10 rounded-full bg-gradient-to-tr from-primary to-purple-500 flex items-center justify-center text-white font-bold text-xs shrink-0 shadow-lg shadow-black/20">
+          <div className="size-10 rounded-full bg-gradient-to-tr from-primary to-purple-500 flex items-center justify-center text-text-foreground font-bold text-xs shrink-0 shadow-lg shadow-black/20">
             {user?.username?.substring(0, 2).toUpperCase() || 'U'}
           </div>
           <div className="flex-1 flex flex-col overflow-hidden">
-            <p className="text-white text-sm font-bold truncate">{user?.username || 'User'}</p>
+            <p className="text-text-foreground text-sm font-bold truncate">{user?.username || 'User'}</p>
             <p className="text-text-secondary text-[11px] truncate opacity-80">
               {user?.email || 'No email'}
             </p>

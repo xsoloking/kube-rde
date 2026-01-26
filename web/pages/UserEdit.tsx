@@ -225,7 +225,7 @@ Type "DELETE" to confirm:`;
               block
             </span>
           </div>
-          <h1 className="text-3xl font-bold text-white mb-4">Access Denied</h1>
+          <h1 className="text-3xl font-bold text-text-foreground mb-4">Access Denied</h1>
           <p className="text-text-secondary mb-6">{error}</p>
           <a
             href="/#/"
@@ -245,7 +245,7 @@ Type "DELETE" to confirm:`;
         <div className="max-w-6xl mx-auto w-full flex flex-col gap-8 pb-24">
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
             <div>
-              <h1 className="text-3xl md:text-4xl font-bold text-white tracking-tight mb-2">
+              <h1 className="text-3xl md:text-4xl font-bold text-text-foreground tracking-tight mb-2">
                 {isOwnProfile
                   ? 'My Profile'
                   : `Edit User: ${loading ? '...' : user?.username || 'Unknown'}`}
@@ -268,10 +268,10 @@ Type "DELETE" to confirm:`;
             <div className="xl:col-span-4 flex flex-col gap-6">
               <section className="bg-surface-dark rounded-2xl border border-border-dark overflow-hidden shadow-xl">
                 <div className="px-6 py-4 border-b border-border-dark flex justify-between items-center bg-background-dark/30">
-                  <h2 className="text-sm font-bold text-white uppercase tracking-widest">
+                  <h2 className="text-sm font-bold text-text-foreground uppercase tracking-widest">
                     Identity
                   </h2>
-                  <button className="text-text-secondary hover:text-white transition-colors">
+                  <button className="text-text-secondary hover:text-text-foreground transition-colors">
                     <span className="material-symbols-outlined text-[20px]">more_horiz</span>
                   </button>
                 </div>
@@ -279,23 +279,23 @@ Type "DELETE" to confirm:`;
                   <div className="flex items-center gap-4">
                     <div className="relative group cursor-pointer shrink-0">
                       <div className="size-20 rounded-full bg-gradient-to-br from-primary to-primary-dark flex items-center justify-center border-2 border-border-dark group-hover:border-primary transition-all duration-300">
-                        <span className="material-symbols-outlined text-white text-4xl">
+                        <span className="material-symbols-outlined text-text-foreground text-4xl">
                           person
                         </span>
                       </div>
                     </div>
                     <div>
-                      <p className="text-white font-bold text-xl">
+                      <p className="text-text-foreground font-bold text-xl">
                         {user?.full_name || user?.name || user?.username || 'Unknown User'}
                       </p>
                       <p className="text-text-secondary text-xs font-medium mt-1">
                         Created{' '}
                         {user?.created_at
                           ? new Date(user.created_at).toLocaleDateString('en-US', {
-                              year: 'numeric',
-                              month: 'short',
-                              day: 'numeric',
-                            })
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric',
+                          })
                           : 'Unknown'}
                       </p>
                     </div>
@@ -306,7 +306,7 @@ Type "DELETE" to confirm:`;
                         Username
                       </label>
                       <input
-                        className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-white opacity-60 cursor-not-allowed text-sm"
+                        className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-text-foreground opacity-60 cursor-not-allowed text-sm"
                         disabled
                         value={user?.username || ''}
                       />
@@ -316,7 +316,7 @@ Type "DELETE" to confirm:`;
                         Email Address
                       </label>
                       <input
-                        className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-white opacity-60 cursor-not-allowed text-sm"
+                        className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-text-foreground opacity-60 cursor-not-allowed text-sm"
                         type="email"
                         disabled
                         value={user?.email || ''}
@@ -352,7 +352,7 @@ Type "DELETE" to confirm:`;
                             handleTeamChange(e.target.value ? parseInt(e.target.value, 10) : null)
                           }
                           disabled={saving}
-                          className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-white text-sm focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all appearance-none cursor-pointer disabled:opacity-50"
+                          className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-text-foreground text-sm focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all appearance-none cursor-pointer disabled:opacity-50"
                         >
                           <option value="">No Team</option>
                           {teams.map((team) => (
@@ -369,7 +369,7 @@ Type "DELETE" to confirm:`;
                       </div>
                     )}
                   </div>
-                  <button className="w-full flex items-center justify-between px-4 py-3.5 bg-background-dark hover:bg-surface-highlight border border-border-dark rounded-xl text-xs font-bold uppercase tracking-widest text-text-secondary hover:text-white transition-all group">
+                  <button className="w-full flex items-center justify-between px-4 py-3.5 bg-background-dark hover:bg-surface-highlight border border-border-dark rounded-xl text-xs font-bold uppercase tracking-widest text-text-secondary hover:text-text-foreground transition-all group">
                     <span className="flex items-center gap-2">
                       <span className="material-symbols-outlined text-[20px] group-hover:text-primary transition-colors">
                         lock_reset
@@ -385,7 +385,7 @@ Type "DELETE" to confirm:`;
 
               <section className="bg-surface-dark rounded-2xl border border-border-dark overflow-hidden flex-1 shadow-xl">
                 <div className="px-6 py-4 border-b border-border-dark flex justify-between items-center bg-background-dark/30">
-                  <h2 className="text-sm font-bold text-white uppercase tracking-widest">
+                  <h2 className="text-sm font-bold text-text-foreground uppercase tracking-widest">
                     SSH Keys
                   </h2>
                   {canEditSSHKeys && (
@@ -408,14 +408,14 @@ Type "DELETE" to confirm:`;
                     sshKeys.map((key) => (
                       <div
                         key={key.id}
-                        className="p-5 flex items-start gap-3 hover:bg-white/5 transition-colors"
+                        className="p-5 flex items-start gap-3 hover:bg-surface-highlight transition-colors"
                       >
                         <div className="mt-1 text-text-secondary shrink-0">
                           <span className="material-symbols-outlined">key</span>
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex justify-between items-start">
-                            <p className="text-white text-sm font-bold truncate">{key.name}</p>
+                            <p className="text-text-foreground text-sm font-bold truncate">{key.name}</p>
                             {canEditSSHKeys && (
                               <button
                                 onClick={() => handleDeleteSSHKey(key.id)}
@@ -452,7 +452,7 @@ Type "DELETE" to confirm:`;
               <section className="bg-surface-dark rounded-2xl border border-border-dark overflow-hidden h-full shadow-xl">
                 <div className="px-6 py-5 border-b border-border-dark flex flex-wrap justify-between items-center gap-4 bg-background-dark/30">
                   <div>
-                    <h2 className="text-xl font-bold text-white">
+                    <h2 className="text-xl font-bold text-text-foreground">
                       Team Resource Quotas
                     </h2>
                     <p className="text-text-secondary text-sm mt-1">
@@ -500,7 +500,7 @@ Type "DELETE" to confirm:`;
                             <span className="material-symbols-outlined text-text-secondary text-[20px]">
                               memory
                             </span>
-                            <label className="text-white font-bold text-base">Compute Resources</label>
+                            <label className="text-text-foreground font-bold text-base">Compute Resources</label>
                           </div>
                           <div className="grid grid-cols-2 gap-4">
                             {teamQuotas
@@ -529,7 +529,7 @@ Type "DELETE" to confirm:`;
                             <span className="material-symbols-outlined text-text-secondary text-[20px]">
                               hard_drive
                             </span>
-                            <label className="text-white font-bold text-base">Storage</label>
+                            <label className="text-text-foreground font-bold text-base">Storage</label>
                           </div>
                           <div className="bg-background-dark border border-border-dark rounded-lg p-4">
                             <div className="space-y-3">
@@ -543,7 +543,7 @@ Type "DELETE" to confirm:`;
                                     <span className="text-text-secondary text-sm">
                                       {q.display_name}
                                     </span>
-                                    <span className="text-white font-bold">
+                                    <span className="text-text-foreground font-bold">
                                       {q.quota} {q.unit}
                                     </span>
                                   </div>
@@ -560,7 +560,7 @@ Type "DELETE" to confirm:`;
                             <span className="material-symbols-outlined text-text-secondary text-[20px]">
                               videogame_asset
                             </span>
-                            <label className="text-white font-bold text-base">GPU Resources</label>
+                            <label className="text-text-foreground font-bold text-base">GPU Resources</label>
                           </div>
                           <div className="bg-background-dark border border-border-dark rounded-lg p-4">
                             <div className="space-y-3">
@@ -572,12 +572,12 @@ Type "DELETE" to confirm:`;
                                     className="flex items-center justify-between"
                                   >
                                     <div>
-                                      <span className="text-white text-sm font-medium">
+                                      <span className="text-text-foreground text-sm font-medium">
                                         {q.display_name}
                                       </span>
                                       <p className="text-text-secondary text-xs">{q.resource_name}</p>
                                     </div>
-                                    <span className="text-white font-bold">
+                                    <span className="text-text-foreground font-bold">
                                       {q.quota} {q.unit}
                                     </span>
                                   </div>
@@ -624,7 +624,7 @@ Type "DELETE" to confirm:`;
       </div>
 
       {isAdmin && (
-        <div className="shrink-0 bg-[#0f1824] border-t border-border-dark p-6 z-20">
+        <div className="shrink-0 bg-background-dark border-t border-border-dark p-6 z-20">
           <div className="max-w-6xl mx-auto w-full flex flex-col sm:flex-row items-center justify-between gap-4">
             <button
               onClick={handleDeleteUser}
@@ -657,14 +657,14 @@ Type "DELETE" to confirm:`;
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
           <div className="bg-surface-dark border border-border-dark rounded-2xl max-w-2xl w-full shadow-2xl">
             <div className="px-6 py-5 border-b border-border-dark flex justify-between items-center">
-              <h2 className="text-xl font-bold text-white">Add SSH Public Key</h2>
+              <h2 className="text-xl font-bold text-text-foreground">Add SSH Public Key</h2>
               <button
                 onClick={() => {
                   setShowAddKeyModal(false);
                   setNewKeyName('');
                   setNewKeyPublic('');
                 }}
-                className="text-text-secondary hover:text-white transition-colors"
+                className="text-text-secondary hover:text-text-foreground transition-colors"
               >
                 <span className="material-symbols-outlined">close</span>
               </button>
@@ -679,7 +679,7 @@ Type "DELETE" to confirm:`;
                   value={newKeyName}
                   onChange={(e) => setNewKeyName(e.target.value)}
                   placeholder="e.g., laptop, work-desktop"
-                  className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all text-sm"
+                  className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all text-sm"
                 />
               </div>
               <div>
@@ -691,7 +691,7 @@ Type "DELETE" to confirm:`;
                   onChange={(e) => setNewKeyPublic(e.target.value)}
                   placeholder="ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC..."
                   rows={6}
-                  className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-white font-mono text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all resize-none"
+                  className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-text-foreground font-mono text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all resize-none"
                 />
                 <p className="text-text-secondary text-xs mt-2">
                   Paste your public key here. Usually found in ~/.ssh/id_rsa.pub or
@@ -706,7 +706,7 @@ Type "DELETE" to confirm:`;
                   setNewKeyName('');
                   setNewKeyPublic('');
                 }}
-                className="h-11 px-8 rounded-xl bg-surface-dark border border-border-dark text-white font-bold text-sm hover:bg-surface-highlight transition-all active:scale-95"
+                className="h-11 px-8 rounded-xl bg-surface-dark border border-border-dark text-text-foreground font-bold text-sm hover:bg-surface-highlight transition-all active:scale-95"
               >
                 Cancel
               </button>

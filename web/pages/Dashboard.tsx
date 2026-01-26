@@ -16,7 +16,7 @@ const StatCard: React.FC<{
       <span className={`material-symbols-outlined ${color}`}>{icon}</span>
     </div>
     <div className="flex flex-col gap-1">
-      <p className="text-3xl font-bold text-white">{value}</p>
+      <p className="text-3xl font-bold text-text-foreground">{value}</p>
       {sub && <p className="text-xs text-text-secondary font-medium">{sub}</p>}
     </div>
   </div>
@@ -37,9 +37,9 @@ const UsageBar: React.FC<{
       <div className="flex justify-between items-center">
         <div className="flex items-center gap-2">
           <span className="material-symbols-outlined text-text-secondary text-sm">{icon}</span>
-          <span className="text-white font-medium text-sm">{label}</span>
+          <span className="text-text-foreground font-medium text-sm">{label}</span>
         </div>
-        <span className="text-xs font-bold text-white">
+        <span className="text-xs font-bold text-text-foreground">
           {used} / {total} {unit}
         </span>
       </div>
@@ -116,13 +116,13 @@ const Dashboard: React.FC = () => {
               // Let's count all services for allocation.
 
               if (svc.cpu_cores) {
-                cpu += svc.cpu_cores;
+                cpu += parseFloat(String(svc.cpu_cores));
               } else {
                 cpu += 0.5; // Default 500m
               }
 
               if (svc.memory_gib) {
-                mem += svc.memory_gib;
+                mem += parseFloat(String(svc.memory_gib));
               } else {
                 mem += 0.5; // Default 512Mi (~0.5Gi)
               }
@@ -171,7 +171,7 @@ const Dashboard: React.FC = () => {
   return (
     <div className="p-8 lg:p-12 max-w-[1400px] mx-auto space-y-10 animate-fade-in">
       <div className="flex flex-col gap-2">
-        <h2 className="text-4xl font-bold tracking-tight text-white">Dashboard</h2>
+        <h2 className="text-4xl font-bold tracking-tight text-text-foreground">Dashboard</h2>
         <p className="text-text-secondary text-lg">
           Overview of your development environments and resource allocation.
         </p>
@@ -199,7 +199,7 @@ const Dashboard: React.FC = () => {
 
           {/* Resource Allocation Detail */}
           <div className="bg-surface-dark/30 rounded-2xl border border-border-dark p-6">
-            <h3 className="text-xl font-bold text-white mb-6">Resource Allocation</h3>
+            <h3 className="text-xl font-bold text-text-foreground mb-6">Resource Allocation</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <UsageBar
                 label="CPU Cores"
@@ -240,7 +240,7 @@ const Dashboard: React.FC = () => {
         {/* Right Column: Recent Workspaces */}
         <div className="lg:col-span-4 flex flex-col gap-6 h-full">
           <div className="flex items-center justify-between">
-            <h3 className="text-xl font-bold text-white">Recent Workspaces</h3>
+            <h3 className="text-xl font-bold text-text-foreground">Recent Workspaces</h3>
             <Link
               to="/workspaces"
               className="text-xs font-bold text-primary hover:text-primary-dark uppercase tracking-widest transition-colors"
@@ -269,7 +269,7 @@ const Dashboard: React.FC = () => {
                         <span className="material-symbols-outlined text-[20px]">folder</span>
                       </div>
                       <div className="min-w-0">
-                        <p className="text-sm font-bold text-white group-hover:text-primary transition-colors truncate">
+                        <p className="text-sm font-bold text-text-foreground group-hover:text-primary transition-colors truncate">
                           {ws.name}
                         </p>
                         <p className="text-[10px] text-text-secondary uppercase tracking-wider truncate">
@@ -277,7 +277,7 @@ const Dashboard: React.FC = () => {
                         </p>
                       </div>
                     </div>
-                    <span className="material-symbols-outlined text-text-secondary group-hover:text-white text-[18px] shrink-0">
+                    <span className="material-symbols-outlined text-text-secondary group-hover:text-text-foreground text-[18px] shrink-0">
                       arrow_forward
                     </span>
                   </Link>
@@ -287,7 +287,7 @@ const Dashboard: React.FC = () => {
             {recentWorkspaces.length > 0 && (
               <Link
                 to="/workspaces/create"
-                className="p-4 text-center text-xs font-bold text-text-secondary hover:text-white hover:bg-surface-highlight transition-colors border-t border-border-dark/50 uppercase tracking-widest bg-background-dark/30 shrink-0"
+                className="p-4 text-center text-xs font-bold text-text-secondary hover:text-text-foreground hover:bg-surface-highlight transition-colors border-t border-border-dark/50 uppercase tracking-widest bg-background-dark/30 shrink-0"
               >
                 + Create New Workspace
               </Link>

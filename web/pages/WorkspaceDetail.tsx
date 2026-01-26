@@ -133,15 +133,15 @@ const WorkspaceDetail: React.FC = () => {
       {/* Breadcrumbs and Top Info */}
       <div className="flex flex-col gap-6">
         <nav className="flex items-center gap-3 text-xs font-medium">
-          <Link to="/" className="text-text-secondary hover:text-white transition-colors">
+          <Link to="/" className="text-text-secondary hover:text-text-foreground transition-colors">
             <span className="material-symbols-outlined text-[18px]">home</span>
           </Link>
           <span className="text-text-secondary">/</span>
-          <Link to="/workspaces" className="text-text-secondary hover:text-white transition-colors">
+          <Link to="/workspaces" className="text-text-secondary hover:text-text-foreground transition-colors">
             Workspaces
           </Link>
           <span className="text-text-secondary">/</span>
-          <span className="bg-surface-highlight text-white px-2 py-0.5 rounded text-[10px] font-mono">
+          <span className="bg-surface-highlight text-text-foreground px-2 py-0.5 rounded text-[10px] font-mono">
             {workspace.id}
           </span>
         </nav>
@@ -149,7 +149,7 @@ const WorkspaceDetail: React.FC = () => {
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-4">
-              <h1 className="text-4xl font-bold tracking-tight text-white">{workspace.name}</h1>
+              <h1 className="text-4xl font-bold tracking-tight text-text-foreground">{workspace.name}</h1>
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5">
                 <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                 Active
@@ -198,7 +198,7 @@ const WorkspaceDetail: React.FC = () => {
                 search
               </span>
               <input
-                className="w-full pl-10 pr-4 py-2 bg-surface-dark/50 border border-border-dark rounded-lg text-sm text-white focus:ring-1 focus:ring-primary focus:border-primary outline-none transition-all placeholder:text-text-secondary/30"
+                className="w-full pl-10 pr-4 py-2 bg-surface-dark/50 border border-border-dark rounded-lg text-sm text-text-foreground focus:ring-1 focus:ring-primary focus:border-primary outline-none transition-all placeholder:text-text-secondary/30"
                 placeholder="Filter services..."
                 type="text"
                 value={filterQuery}
@@ -252,10 +252,10 @@ const WorkspaceDetail: React.FC = () => {
                 </thead>
                 <tbody className="divide-y divide-border-dark/60 font-medium text-sm">
                   {filteredServices.map((svc) => (
-                    <tr key={svc.id} className="hover:bg-white/5 transition-colors group">
+                    <tr key={svc.id} className="hover:bg-surface-highlight transition-colors group">
                       <td className="px-6 py-5">
                         <div className="flex items-center gap-3">
-                          <div className="size-10 rounded-lg bg-surface-dark flex items-center justify-center border border-white/5">
+                          <div className="size-10 rounded-lg bg-surface-dark flex items-center justify-center border border-border-dark">
                             <span
                               className={`material-symbols-outlined text-[20px] ${getAgentTypeColor(svc.agent_type)}`}
                             >
@@ -265,7 +265,7 @@ const WorkspaceDetail: React.FC = () => {
                           <div>
                             <Link
                               to={`/services/${svc.id}`}
-                              className="font-bold text-white text-xs hover:text-primary transition-colors"
+                              className="font-bold text-text-foreground text-xs hover:text-primary transition-colors"
                             >
                               {svc.name}
                             </Link>
@@ -295,7 +295,7 @@ const WorkspaceDetail: React.FC = () => {
                             <span className="material-symbols-outlined text-[16px] text-primary">
                               {getAgentTypeIcon(svc.agent_type)}
                             </span>
-                            <span className="text-[10px] font-bold text-white uppercase tracking-widest">
+                            <span className="text-[10px] font-bold text-text-foreground uppercase tracking-widest">
                               {getAgentTypeLabel(svc.agent_type)}
                             </span>
                           </div>

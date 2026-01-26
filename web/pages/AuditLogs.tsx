@@ -57,7 +57,7 @@ const AuditLogs: React.FC = () => {
   return (
     <div className="p-8 lg:p-12 max-w-[1400px] mx-auto space-y-8 animate-fade-in">
       <div className="flex flex-col gap-2">
-        <h2 className="text-4xl font-bold tracking-tight text-white">Audit Logs</h2>
+        <h2 className="text-4xl font-bold tracking-tight text-text-foreground">Audit Logs</h2>
         <p className="text-text-secondary max-w-2xl text-lg">
           Track user actions and system events for compliance and security.
         </p>
@@ -78,7 +78,7 @@ const AuditLogs: React.FC = () => {
               value={userId}
               onChange={(e) => setUserId(e.target.value)}
               placeholder="Filter by User ID..."
-              className="w-full h-10 px-3 bg-background-dark border border-border-dark rounded-lg text-white focus:border-primary focus:outline-none text-sm"
+              className="w-full h-10 px-3 bg-background-dark border border-border-dark rounded-lg text-text-foreground focus:border-primary focus:outline-none text-sm"
             />
           </div>
           <div>
@@ -88,7 +88,7 @@ const AuditLogs: React.FC = () => {
             <select
               value={action}
               onChange={(e) => setAction(e.target.value)}
-              className="w-full h-10 px-3 bg-background-dark border border-border-dark rounded-lg text-white focus:border-primary focus:outline-none text-sm appearance-none cursor-pointer"
+              className="w-full h-10 px-3 bg-background-dark border border-border-dark rounded-lg text-text-foreground focus:border-primary focus:outline-none text-sm appearance-none cursor-pointer"
             >
               <option value="">All Actions</option>
               <option value="create">Create</option>
@@ -104,7 +104,7 @@ const AuditLogs: React.FC = () => {
             <select
               value={resource}
               onChange={(e) => setResource(e.target.value)}
-              className="w-full h-10 px-3 bg-background-dark border border-border-dark rounded-lg text-white focus:border-primary focus:outline-none text-sm appearance-none cursor-pointer"
+              className="w-full h-10 px-3 bg-background-dark border border-border-dark rounded-lg text-text-foreground focus:border-primary focus:outline-none text-sm appearance-none cursor-pointer"
             >
               <option value="">All Resources</option>
               <option value="user">User</option>
@@ -121,7 +121,7 @@ const AuditLogs: React.FC = () => {
               type="datetime-local"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="w-full h-10 px-3 bg-background-dark border border-border-dark rounded-lg text-white focus:border-primary focus:outline-none text-sm"
+              className="w-full h-10 px-3 bg-background-dark border border-border-dark rounded-lg text-text-foreground focus:border-primary focus:outline-none text-sm"
             />
           </div>
           <div>
@@ -132,7 +132,7 @@ const AuditLogs: React.FC = () => {
               type="datetime-local"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              className="w-full h-10 px-3 bg-background-dark border border-border-dark rounded-lg text-white focus:border-primary focus:outline-none text-sm"
+              className="w-full h-10 px-3 bg-background-dark border border-border-dark rounded-lg text-text-foreground focus:border-primary focus:outline-none text-sm"
             />
           </div>
         </div>
@@ -200,11 +200,11 @@ const AuditLogs: React.FC = () => {
                 </tr>
               ) : (
                 logs.map((log) => (
-                  <tr key={log.id} className="hover:bg-white/5 transition-colors group">
+                  <tr key={log.id} className="hover:bg-surface-highlight transition-colors group">
                     <td className="p-5 text-text-secondary whitespace-nowrap">
                       {new Date(log.timestamp).toLocaleString()}
                     </td>
-                    <td className="p-5 font-medium text-white">
+                    <td className="p-5 font-medium text-text-foreground">
                       {log.user ? (
                         <Link
                           to={`/users/${log.user.id}`}
@@ -262,14 +262,14 @@ const AuditLogs: React.FC = () => {
               <button
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={page === 1}
-                className="px-3 py-1.5 rounded-lg border border-border-dark text-xs font-bold text-text-secondary hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                className="px-3 py-1.5 rounded-lg border border-border-dark text-xs font-bold text-text-secondary hover:bg-surface-highlight disabled:opacity-30 disabled:cursor-not-allowed transition-all"
               >
                 Previous
               </button>
               <button
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                 disabled={page >= totalPages}
-                className="px-3 py-1.5 rounded-lg border border-border-dark text-xs font-bold text-text-secondary hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                className="px-3 py-1.5 rounded-lg border border-border-dark text-xs font-bold text-text-secondary hover:bg-surface-highlight disabled:opacity-30 disabled:cursor-not-allowed transition-all"
               >
                 Next
               </button>

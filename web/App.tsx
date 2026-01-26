@@ -1,6 +1,7 @@
 import React from 'react';
 import { HashRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
@@ -35,7 +36,7 @@ const AppLayout: React.FC = () => {
   }
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-background-dark font-body text-white selection:bg-primary/30">
+    <div className="flex h-screen w-screen overflow-hidden bg-background-dark font-body text-text-foreground selection:bg-primary/30">
       <Sidebar />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header />
@@ -178,11 +179,13 @@ const AppLayout: React.FC = () => {
 
 const App: React.FC = () => {
   return (
-    <AuthProvider>
-      <HashRouter>
-        <AppLayout />
-      </HashRouter>
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <HashRouter>
+          <AppLayout />
+        </HashRouter>
+      </AuthProvider>
+    </ThemeProvider>
   );
 };
 
