@@ -1,10 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import {
-  teamsApi,
-  Team,
-  TeamQuotaItem,
-} from '../services/api';
+import { teamsApi, Team, TeamQuotaItem } from '../services/api';
 
 const TeamQuotaEdit: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -20,13 +16,7 @@ const TeamQuotaEdit: React.FC = () => {
   // Local quota values for editing
   const [quotaValues, setQuotaValues] = useState<{ [key: number]: number }>({});
 
-  useEffect(() => {
-    if (teamId) {
-      loadData();
-    }
-  }, [teamId]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -52,7 +42,13 @@ const TeamQuotaEdit: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [teamId]);
+
+  useEffect(() => {
+    if (teamId) {
+      loadData();
+    }
+  }, [teamId, loadData]);
 
   const handleSave = async () => {
     try {
@@ -78,7 +74,9 @@ const TeamQuotaEdit: React.FC = () => {
   };
 
   // Group quotas by type
-  const computeQuotas = quotas.filter((q) => q.resource_type === 'cpu' || q.resource_type === 'memory');
+  const computeQuotas = quotas.filter(
+    (q) => q.resource_type === 'cpu' || q.resource_type === 'memory',
+  );
   const storageQuotas = quotas.filter((q) => q.resource_type === 'storage');
   const gpuQuotas = quotas.filter((q) => q.resource_type === 'gpu');
 
@@ -129,8 +127,9 @@ const TeamQuotaEdit: React.FC = () => {
           </div>
           <h2 className="text-4xl font-bold tracking-tight">Team Quota</h2>
           <p className="text-text-secondary max-w-2xl text-lg">
-            Set resource quotas for <span className="text-text-foreground font-medium">{team.display_name}</span>.
-            Resources will be shared among all team members.
+            Set resource quotas for{' '}
+            <span className="text-text-foreground font-medium">{team.display_name}</span>. Resources
+            will be shared among all team members.
           </p>
         </div>
         <div className="flex gap-3">
@@ -160,7 +159,8 @@ const TeamQuotaEdit: React.FC = () => {
           <div>
             <h3 className="text-xl font-bold">{team.display_name}</h3>
             <p className="text-text-secondary text-sm">
-              Namespace: <code className="px-2 py-0.5 bg-background-dark rounded">{team.namespace}</code>
+              Namespace:{' '}
+              <code className="px-2 py-0.5 bg-background-dark rounded">{team.namespace}</code>
             </p>
           </div>
         </div>
@@ -174,9 +174,7 @@ const TeamQuotaEdit: React.FC = () => {
               <span className="material-symbols-outlined text-primary">memory</span>
               Compute Resources
             </h3>
-            <p className="text-text-secondary text-sm mt-1">
-              CPU and memory limits for the team
-            </p>
+            <p className="text-text-secondary text-sm mt-1">CPU and memory limits for the team</p>
           </div>
           <div className="p-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -190,7 +188,10 @@ const TeamQuotaEdit: React.FC = () => {
                     min="0"
                     value={quotaValues[q.resource_config_id] || 0}
                     onChange={(e) =>
-                      setQuotaValues({ ...quotaValues, [q.resource_config_id]: parseInt(e.target.value, 10) || 0 })
+                      setQuotaValues({
+                        ...quotaValues,
+                        [q.resource_config_id]: parseInt(e.target.value, 10) || 0,
+                      })
                     }
                     className="w-full h-11 px-4 bg-background-dark border border-border-dark rounded-xl focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all text-sm"
                   />
@@ -212,9 +213,7 @@ const TeamQuotaEdit: React.FC = () => {
               <span className="material-symbols-outlined text-blue-500">storage</span>
               Storage Resources
             </h3>
-            <p className="text-text-secondary text-sm mt-1">
-              Storage quotas for the team
-            </p>
+            <p className="text-text-secondary text-sm mt-1">Storage quotas for the team</p>
           </div>
           <div className="p-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -308,7 +307,8 @@ const TeamQuotaEdit: React.FC = () => {
           </span>
           <h3 className="text-xl font-bold mb-2">No Resource Types Configured</h3>
           <p className="text-text-secondary max-w-md mx-auto">
-            Resource types need to be configured in the system settings before team quotas can be set.
+            Resource types need to be configured in the system settings before team quotas can be
+            set.
           </p>
         </div>
       )}

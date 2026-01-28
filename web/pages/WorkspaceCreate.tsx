@@ -113,7 +113,9 @@ const WorkspaceCreate: React.FC = () => {
                 ← Workspaces
               </Link>
               <span className="text-text-secondary">/</span>
-              <h1 className="text-2xl font-bold tracking-tight text-text-foreground">New Workspace</h1>
+              <h1 className="text-2xl font-bold tracking-tight text-text-foreground">
+                New Workspace
+              </h1>
             </div>
             <div className="flex items-center gap-3">
               <button
@@ -184,7 +186,9 @@ const WorkspaceCreate: React.FC = () => {
               {/* Storage Configuration Card */}
               <div className="bg-surface-dark rounded-xl border border-border-dark p-5 shadow-xl">
                 <div className="flex items-center gap-2 pb-3 border-b border-border-dark/50 mb-4">
-                  <span className="material-symbols-outlined text-primary text-[18px]">storage</span>
+                  <span className="material-symbols-outlined text-primary text-[18px]">
+                    storage
+                  </span>
                   <h3 className="text-sm font-bold text-text-foreground">Storage Configuration</h3>
                 </div>
 
@@ -255,8 +259,8 @@ const WorkspaceCreate: React.FC = () => {
                       <span className="text-text-secondary">1 Gi</span>
                       <span className="text-primary font-bold">
                         Quota:{' '}
-                        {quota?.storage_quota?.find((item) => item.name === storageClass)?.limit_gi ||
-                          100}{' '}
+                        {quota?.storage_quota?.find((item) => item.name === storageClass)
+                          ?.limit_gi || 100}{' '}
                         Gi
                       </span>
                     </div>
@@ -269,7 +273,8 @@ const WorkspaceCreate: React.FC = () => {
                     info
                   </span>
                   <p className="text-[10px] text-text-secondary">
-                    You can create services and manage configurations after the workspace is created.
+                    You can create services and manage configurations after the workspace is
+                    created.
                   </p>
                 </div>
               </div>

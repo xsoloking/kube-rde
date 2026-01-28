@@ -228,7 +228,10 @@ const ServiceCreate: React.FC = () => {
     <div className="p-8 lg:px-12 lg:py-6 max-w-[1000px] mx-auto w-full animate-fade-in space-y-8">
       {/* Breadcrumbs */}
       <nav className="flex items-center gap-3 text-xs font-medium">
-        <Link to="/workspaces" className="text-text-secondary hover:text-text-foreground transition-colors">
+        <Link
+          to="/workspaces"
+          className="text-text-secondary hover:text-text-foreground transition-colors"
+        >
           Workspaces
         </Link>
         <span className="material-symbols-outlined text-[14px] text-text-secondary">
@@ -322,7 +325,9 @@ const ServiceCreate: React.FC = () => {
                       </span>
                     </div>
                     <div className="flex-1">
-                      <h3 className="text-base font-bold text-text-foreground mb-1">{template.name}</h3>
+                      <h3 className="text-base font-bold text-text-foreground mb-1">
+                        {template.name}
+                      </h3>
                       <p className="text-xs text-text-secondary line-clamp-2">
                         {template.description || 'No description'}
                       </p>
@@ -373,7 +378,9 @@ const ServiceCreate: React.FC = () => {
                     ) : (
                       <div className="bg-background-dark/50 rounded-xl border border-amber-500/20 p-6 space-y-4 animate-fade-in">
                         <div className="flex items-center justify-between mb-4 pb-3 border-b border-amber-500/20">
-                          <h4 className="text-sm font-bold text-text-foreground">Add Your SSH Public Key</h4>
+                          <h4 className="text-sm font-bold text-text-foreground">
+                            Add Your SSH Public Key
+                          </h4>
                           <button
                             type="button"
                             onClick={() => {
@@ -606,7 +613,9 @@ const ServiceCreate: React.FC = () => {
                       <span className="material-symbols-outlined text-xl">developer_board</span>
                     </div>
                     <div>
-                      <h4 className="font-bold text-base text-text-foreground">Enable GPU Acceleration</h4>
+                      <h4 className="font-bold text-base text-text-foreground">
+                        Enable GPU Acceleration
+                      </h4>
                       <p className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">
                         Required for complex model training
                       </p>

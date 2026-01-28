@@ -7475,7 +7475,7 @@ func handleGetTeam(w http.ResponseWriter, r *http.Request, teamID uint) {
 	members, _ := teamRepo.GetMembers(teamID)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"team":         team,
 		"member_count": len(members),
 	})
@@ -7511,7 +7511,7 @@ func handleUpdateTeam(w http.ResponseWriter, r *http.Request, teamID uint) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(team)
+	_ = json.NewEncoder(w).Encode(team)
 }
 
 func handleDeleteTeam(w http.ResponseWriter, r *http.Request, teamID uint) {
@@ -7544,7 +7544,7 @@ func handleDeleteTeam(w http.ResponseWriter, r *http.Request, teamID uint) {
 	}
 
 	// Delete team quota
-	teamQuotaRepo.DeleteByTeamID(teamID)
+	_ = teamQuotaRepo.DeleteByTeamID(teamID)
 
 	// Delete team from database
 	if err := teamRepo.Delete(teamID); err != nil {
@@ -7659,7 +7659,7 @@ func handleTeamMembers(w http.ResponseWriter, r *http.Request, teamID uint, memb
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"members": members,
 		})
 
@@ -7721,7 +7721,7 @@ func handleTeamMembers(w http.ResponseWriter, r *http.Request, teamID uint, memb
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"message": "Member added successfully",
 			"user":    user,
 		})
@@ -7752,7 +7752,7 @@ func handleTeamMembers(w http.ResponseWriter, r *http.Request, teamID uint, memb
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"message": "Member removed successfully",
 		})
 
@@ -7868,7 +7868,7 @@ func handleGetTeamQuota(w http.ResponseWriter, r *http.Request, teamID uint) {
 		LimitGi   int    `json:"limit_gi"`
 		IsDefault bool   `json:"is_default"`
 	}
-	json.Unmarshal([]byte(resourceConfig.StorageClasses), &storageClasses)
+	_ = json.Unmarshal([]byte(resourceConfig.StorageClasses), &storageClasses)
 
 	// Parse GPU types from resource config
 	var gpuTypes []struct {
@@ -7880,12 +7880,12 @@ func handleGetTeamQuota(w http.ResponseWriter, r *http.Request, teamID uint) {
 		Limit          int    `json:"limit"`
 		IsDefault      bool   `json:"is_default"`
 	}
-	json.Unmarshal([]byte(resourceConfig.GPUTypes), &gpuTypes)
+	_ = json.Unmarshal([]byte(resourceConfig.GPUTypes), &gpuTypes)
 
 	// Parse existing storage quota
 	var existingStorageQuota []models.StorageQuotaItem
 	if existingQuota.StorageQuota != nil {
-		json.Unmarshal(existingQuota.StorageQuota, &existingStorageQuota)
+		_ = json.Unmarshal(existingQuota.StorageQuota, &existingStorageQuota)
 	}
 	storageQuotaMap := make(map[string]int)
 	for _, sq := range existingStorageQuota {
@@ -7895,7 +7895,7 @@ func handleGetTeamQuota(w http.ResponseWriter, r *http.Request, teamID uint) {
 	// Parse existing GPU quota
 	var existingGPUQuota []models.GPUQuotaItem
 	if existingQuota.GPUQuota != nil {
-		json.Unmarshal(existingQuota.GPUQuota, &existingGPUQuota)
+		_ = json.Unmarshal(existingQuota.GPUQuota, &existingGPUQuota)
 	}
 	gpuQuotaMap := make(map[string]int)
 	for _, gq := range existingGPUQuota {
@@ -7950,7 +7950,7 @@ func handleGetTeamQuota(w http.ResponseWriter, r *http.Request, teamID uint) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"team":   team,
 		"quotas": quotaItems,
 	})
@@ -8022,7 +8022,7 @@ func handleUpdateTeamQuota(w http.ResponseWriter, r *http.Request, teamID uint) 
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"message": "Team quotas updated successfully",
 	})
 }
@@ -8097,7 +8097,7 @@ func applyTeamResourceQuotaNew(team *models.Team, quota *models.TeamQuota) error
 	// Storage - sum all storage quotas
 	var storageQuotas []models.StorageQuotaItem
 	if quota.StorageQuota != nil {
-		json.Unmarshal(quota.StorageQuota, &storageQuotas)
+		_ = json.Unmarshal(quota.StorageQuota, &storageQuotas)
 	}
 	totalStorage := 0
 	for _, sq := range storageQuotas {
@@ -8110,7 +8110,7 @@ func applyTeamResourceQuotaNew(team *models.Team, quota *models.TeamQuota) error
 	// GPU - add each GPU type as extended resource
 	var gpuQuotas []models.GPUQuotaItem
 	if quota.GPUQuota != nil {
-		json.Unmarshal(quota.GPUQuota, &gpuQuotas)
+		_ = json.Unmarshal(quota.GPUQuota, &gpuQuotas)
 	}
 	for _, gq := range gpuQuotas {
 		if gq.Limit > 0 && gq.Name != "" {
@@ -8150,7 +8150,7 @@ func handleListTeams(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"teams": teams,
 	})
 }
@@ -8199,7 +8199,7 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(team)
+	_ = json.NewEncoder(w).Encode(team)
 }
 
 // createDefaultTeamQuota creates a default team quota from resource config
@@ -8216,7 +8216,7 @@ func createDefaultTeamQuota(team *models.Team) error {
 		LimitGi   int    `json:"limit_gi"`
 		IsDefault bool   `json:"is_default"`
 	}
-	json.Unmarshal([]byte(resourceConfig.StorageClasses), &storageClasses)
+	_ = json.Unmarshal([]byte(resourceConfig.StorageClasses), &storageClasses)
 
 	// Parse GPU types from resource config
 	var gpuTypes []struct {
@@ -8225,7 +8225,7 @@ func createDefaultTeamQuota(team *models.Team) error {
 		ResourceName string `json:"resource_name"`
 		Limit        int    `json:"limit"`
 	}
-	json.Unmarshal([]byte(resourceConfig.GPUTypes), &gpuTypes)
+	_ = json.Unmarshal([]byte(resourceConfig.GPUTypes), &gpuTypes)
 
 	// Build storage quota from defaults
 	var storageQuotas []models.StorageQuotaItem

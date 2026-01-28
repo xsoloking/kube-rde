@@ -169,7 +169,7 @@ type AuditLog struct {
 // Team represents an organizational unit that owns a Kubernetes namespace
 type Team struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
-	Name        string    `gorm:"uniqueIndex;not null" json:"name"`     // e.g., "ai-team"
+	Name        string    `gorm:"uniqueIndex;not null" json:"name"`      // e.g., "ai-team"
 	DisplayName string    `json:"display_name"`                          // e.g., "AI Research Team"
 	Namespace   string    `gorm:"uniqueIndex;not null" json:"namespace"` // e.g., "kuberde-ai-team"
 	Status      string    `gorm:"default:'active'" json:"status"`        // active, suspended

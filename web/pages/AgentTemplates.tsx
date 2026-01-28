@@ -413,7 +413,10 @@ const AgentTemplates: React.FC = () => {
                   const isBuiltIn = isBuiltInTemplate(template.id);
 
                   return (
-                    <tr key={template.id} className="hover:bg-surface-highlight transition-colors group">
+                    <tr
+                      key={template.id}
+                      className="hover:bg-surface-highlight transition-colors group"
+                    >
                       <td className="p-5">
                         <div className="flex items-center gap-3">
                           <div className="size-10 rounded-lg bg-surface-dark flex items-center justify-center border border-border-dark">
@@ -422,7 +425,9 @@ const AgentTemplates: React.FC = () => {
                             </span>
                           </div>
                           <div>
-                            <p className="font-bold text-text-foreground text-sm">{template.name}</p>
+                            <p className="font-bold text-text-foreground text-sm">
+                              {template.name}
+                            </p>
                             <p className="text-[10px] text-text-secondary opacity-60 font-mono">
                               {template.id}
                             </p>

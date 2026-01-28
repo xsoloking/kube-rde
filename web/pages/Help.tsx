@@ -84,15 +84,16 @@ const Help: React.FC = () => {
               </p>
               <ul className="list-disc list-inside text-text-secondary space-y-2 ml-2">
                 <li>
-                  <strong className="text-text-foreground">SSH Server:</strong> Standard Linux environment.
-                  Best for VS Code Remote.
+                  <strong className="text-text-foreground">SSH Server:</strong> Standard Linux
+                  environment. Best for VS Code Remote.
                 </li>
                 <li>
-                  <strong className="text-text-foreground">Code Server:</strong> VS Code running in your
-                  browser.
+                  <strong className="text-text-foreground">Code Server:</strong> VS Code running in
+                  your browser.
                 </li>
                 <li>
-                  <strong className="text-text-foreground">Jupyter:</strong> Python data science environment.
+                  <strong className="text-text-foreground">Jupyter:</strong> Python data science
+                  environment.
                 </li>
               </ul>
             </div>

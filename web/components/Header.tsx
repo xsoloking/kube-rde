@@ -83,7 +83,9 @@ const Header: React.FC = () => {
             {showUserMenu && (
               <div className="absolute right-0 mt-2 w-64 bg-surface-dark border border-border-dark rounded-lg shadow-lg overflow-hidden z-10">
                 <div className="px-4 py-3 border-b border-border-dark">
-                  <p className="text-sm text-text-foreground font-medium">{user?.username || 'User'}</p>
+                  <p className="text-sm text-text-foreground font-medium">
+                    {user?.username || 'User'}
+                  </p>
                   <p className="text-xs text-text-secondary">{user?.email || 'No email'}</p>
                   {user?.roles && user.roles.length > 0 && (
                     <div className="mt-2 flex gap-1 flex-wrap">

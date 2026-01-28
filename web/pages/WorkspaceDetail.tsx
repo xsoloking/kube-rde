@@ -1,6 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
-import { workspacesApi, servicesApi, Workspace, Service } from '../services/api';
+import {
+  workspacesApi,
+  servicesApi,
+  Workspace,
+  Service,
+  systemConfigApi,
+  SystemConfig,
+} from '../services/api';
 
 const WorkspaceDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -10,6 +17,7 @@ const WorkspaceDetail: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filterQuery, setFilterQuery] = useState('');
+  const [systemConfig, setSystemConfig] = useState<SystemConfig | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -19,13 +27,16 @@ const WorkspaceDetail: React.FC = () => {
         setLoading(true);
         setError(null);
 
-        // Fetch workspace details
-        const ws = await workspacesApi.get(id);
-        setWorkspace(ws);
+        // Fetch all data in parallel
+        const [ws, svcs, config] = await Promise.all([
+          workspacesApi.get(id),
+          servicesApi.listByWorkspace(id),
+          systemConfigApi.get().catch(() => null), // Fail gracefully
+        ]);
 
-        // Fetch services in this workspace
-        const svcs = await servicesApi.listByWorkspace(id);
+        setWorkspace(ws);
         setServices(svcs);
+        setSystemConfig(config);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to load workspace';
         setError(message);
@@ -137,7 +148,10 @@ const WorkspaceDetail: React.FC = () => {
             <span className="material-symbols-outlined text-[18px]">home</span>
           </Link>
           <span className="text-text-secondary">/</span>
-          <Link to="/workspaces" className="text-text-secondary hover:text-text-foreground transition-colors">
+          <Link
+            to="/workspaces"
+            className="text-text-secondary hover:text-text-foreground transition-colors"
+          >
             Workspaces
           </Link>
           <span className="text-text-secondary">/</span>
@@ -149,7 +163,9 @@ const WorkspaceDetail: React.FC = () => {
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-4">
-              <h1 className="text-4xl font-bold tracking-tight text-text-foreground">{workspace.name}</h1>
+              <h1 className="text-4xl font-bold tracking-tight text-text-foreground">
+                {workspace.name}
+              </h1>
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5">
                 <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                 Active
@@ -319,12 +335,21 @@ const WorkspaceDetail: React.FC = () => {
                           </Link>
                         ) : (
                           <button
-                            onClick={() =>
-                              window.open(
-                                `http://${svc.remote_proxy || `${svc.agent_id}.192-168-97-2.nip.io`}/`,
-                                '_blank',
-                              )
-                            }
+                            onClick={() => {
+                              const url = svc.remote_proxy
+                                ? svc.remote_proxy
+                                : systemConfig
+                                  ? `${svc.agent_id}.${systemConfig.agent_domain}`
+                                  : null;
+
+                              if (url) {
+                                window.open(`http://${url}/`, '_blank');
+                              } else {
+                                alert(
+                                  'Service URL is not available yet. Please wait for the service to start.',
+                                );
+                              }
+                            }}
                             className="inline-flex items-center gap-2 px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary text-[10px] font-bold uppercase tracking-widest rounded-lg border border-primary/20 transition-all"
                           >
                             <span className="material-symbols-outlined text-[16px]">

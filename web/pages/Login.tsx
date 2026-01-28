@@ -31,7 +31,9 @@ const Login: React.FC = () => {
         <div className="text-center mb-8">
           <div className="flex items-center justify-center mb-6">
             <div className="size-20 rounded-2xl bg-gradient-to-br from-primary to-primary-dark flex items-center justify-center shadow-xl shadow-primary/20">
-              <span className="material-symbols-outlined text-text-foreground text-5xl">deployed_code</span>
+              <span className="material-symbols-outlined text-text-foreground text-5xl">
+                deployed_code
+              </span>
             </div>
           </div>
           <h1 className="text-4xl font-bold text-text-foreground mb-2">KubeRDE</h1>

@@ -1,6 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { teamsApi, usersApi, Team, CreateTeamRequest, UpdateTeamRequest, User } from '../services/api';
+import {
+  teamsApi,
+  usersApi,
+  Team,
+  CreateTeamRequest,
+  UpdateTeamRequest,
+  User,
+} from '../services/api';
 
 const TeamManagement: React.FC = () => {
   const [teams, setTeams] = useState<Team[]>([]);
@@ -14,7 +21,10 @@ const TeamManagement: React.FC = () => {
   // Edit modal state
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
-  const [editForm, setEditForm] = useState<UpdateTeamRequest>({ display_name: '', status: 'active' });
+  const [editForm, setEditForm] = useState<UpdateTeamRequest>({
+    display_name: '',
+    status: 'active',
+  });
   const [saving, setSaving] = useState(false);
 
   // Members modal state
@@ -157,7 +167,7 @@ const TeamManagement: React.FC = () => {
 
   // Get users available to add (not already in the team)
   const availableUsers = allUsers.filter(
-    (user) => !members.some((member) => member.id === user.id)
+    (user) => !members.some((member) => member.id === user.id),
   );
 
   const handleDeleteTeam = async (teamId: number, teamName: string) => {
@@ -639,8 +649,12 @@ Type "DELETE" to confirm:`;
                         </span>
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium text-text-foreground text-sm truncate">{user.username}</p>
-                        <p className="text-text-secondary text-xs truncate">{user.email || 'No email'}</p>
+                        <p className="font-medium text-text-foreground text-sm truncate">
+                          {user.username}
+                        </p>
+                        <p className="text-text-secondary text-xs truncate">
+                          {user.email || 'No email'}
+                        </p>
                       </div>
                     </button>
                   ))}

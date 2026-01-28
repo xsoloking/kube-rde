@@ -359,7 +359,9 @@ const ServiceDetail: React.FC = () => {
           </div>
           <div>
             <div className="flex items-center gap-4">
-              <h1 className="text-3xl font-bold tracking-tight text-text-foreground">{service.name}</h1>
+              <h1 className="text-3xl font-bold tracking-tight text-text-foreground">
+                {service.name}
+              </h1>
               <span
                 className={`px-2.5 py-0.5 rounded-full bg-${statusColor}-500/10 text-${statusColor}-400 text-[10px] font-bold uppercase tracking-widest border border-${statusColor}-500/20 flex items-center gap-1.5`}
               >
@@ -490,7 +492,9 @@ const ServiceDetail: React.FC = () => {
                     <div className="flex items-center justify-between bg-background-dark/50 border border-border-dark p-3 rounded-lg">
                       <div className="flex items-center gap-3">
                         <span className="material-symbols-outlined text-primary">download</span>
-                        <span className="text-xs font-mono text-text-foreground/80">kuberde-cli-latest</span>
+                        <span className="text-xs font-mono text-text-foreground/80">
+                          kuberde-cli-latest
+                        </span>
                       </div>
                       <button
                         onClick={handleDownloadCLI}
@@ -645,16 +649,22 @@ const ServiceDetail: React.FC = () => {
                   <div className="flex gap-2">
                     <div className="flex-1 bg-background-dark/50 border border-border-dark p-3 rounded-lg flex items-center overflow-hidden">
                       <span className="text-xs font-mono text-text-foreground/80 truncate">
-                        http://{service.remote_proxy || `${service.agent_id}.192-168-97-2.nip.io`}/
+                        {service.remote_proxy
+                          ? `http://${service.remote_proxy}/`
+                          : systemConfig
+                            ? `http://${service.agent_id}.${systemConfig.agent_domain}/`
+                            : 'Loading available URL...'}
                       </span>
                     </div>
                     <button
-                      onClick={() =>
-                        copyToClipboard(
-                          `http://${service.remote_proxy || `${service.agent_id}.192-168-97-2.nip.io`}/`,
-                          setCopiedWebURL,
-                        )
-                      }
+                      onClick={() => {
+                        const url = service.remote_proxy
+                          ? `http://${service.remote_proxy}/`
+                          : systemConfig
+                            ? `http://${service.agent_id}.${systemConfig.agent_domain}/`
+                            : '';
+                        if (url) copyToClipboard(url, setCopiedWebURL);
+                      }}
                       className="bg-background-dark border border-border-dark p-3 rounded-lg text-text-secondary hover:text-text-foreground transition-all shadow-sm"
                       title="Copy URL"
                     >
@@ -663,12 +673,14 @@ const ServiceDetail: React.FC = () => {
                       </span>
                     </button>
                     <button
-                      onClick={() =>
-                        window.open(
-                          `http://${service.remote_proxy || `${service.agent_id}.192-168-97-2.nip.io`}/`,
-                          '_blank',
-                        )
-                      }
+                      onClick={() => {
+                        const url = service.remote_proxy
+                          ? `http://${service.remote_proxy}/`
+                          : systemConfig
+                            ? `http://${service.agent_id}.${systemConfig.agent_domain}/`
+                            : '';
+                        if (url) window.open(url, '_blank');
+                      }}
                       className="bg-primary text-white p-3 rounded-lg shadow-lg shadow-primary/20 hover:bg-primary-dark transition-all"
                       title="Open in new tab"
                     >

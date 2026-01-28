@@ -508,7 +508,8 @@ Type "DELETE" to confirm:`;
             <span className="font-bold text-text-foreground">
               {Math.min(startIndex + itemsPerPage, filteredUsers.length)}
             </span>{' '}
-            of <span className="font-bold text-text-foreground">{filteredUsers.length}</span> results
+            of <span className="font-bold text-text-foreground">{filteredUsers.length}</span>{' '}
+            results
           </div>
           {totalPages > 1 && (
             <div className="flex items-center gap-2">

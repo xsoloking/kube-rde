@@ -292,10 +292,10 @@ Type "DELETE" to confirm:`;
                         Created{' '}
                         {user?.created_at
                           ? new Date(user.created_at).toLocaleDateString('en-US', {
-                            year: 'numeric',
-                            month: 'short',
-                            day: 'numeric',
-                          })
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric',
+                            })
                           : 'Unknown'}
                       </p>
                     </div>
@@ -415,7 +415,9 @@ Type "DELETE" to confirm:`;
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex justify-between items-start">
-                            <p className="text-text-foreground text-sm font-bold truncate">{key.name}</p>
+                            <p className="text-text-foreground text-sm font-bold truncate">
+                              {key.name}
+                            </p>
                             {canEditSSHKeys && (
                               <button
                                 onClick={() => handleDeleteSSHKey(key.id)}
@@ -452,9 +454,7 @@ Type "DELETE" to confirm:`;
               <section className="bg-surface-dark rounded-2xl border border-border-dark overflow-hidden h-full shadow-xl">
                 <div className="px-6 py-5 border-b border-border-dark flex flex-wrap justify-between items-center gap-4 bg-background-dark/30">
                   <div>
-                    <h2 className="text-xl font-bold text-text-foreground">
-                      Team Resource Quotas
-                    </h2>
+                    <h2 className="text-xl font-bold text-text-foreground">Team Resource Quotas</h2>
                     <p className="text-text-secondary text-sm mt-1">
                       {selectedTeamId ? (
                         <>
@@ -494,17 +494,23 @@ Type "DELETE" to confirm:`;
                     /* Team Quotas Display (Read-Only) */
                     <>
                       {/* Compute Resources */}
-                      {teamQuotas.filter((q) => q.resource_type === 'cpu' || q.resource_type === 'memory').length > 0 && (
+                      {teamQuotas.filter(
+                        (q) => q.resource_type === 'cpu' || q.resource_type === 'memory',
+                      ).length > 0 && (
                         <div>
                           <div className="flex items-center gap-2 mb-4">
                             <span className="material-symbols-outlined text-text-secondary text-[20px]">
                               memory
                             </span>
-                            <label className="text-text-foreground font-bold text-base">Compute Resources</label>
+                            <label className="text-text-foreground font-bold text-base">
+                              Compute Resources
+                            </label>
                           </div>
                           <div className="grid grid-cols-2 gap-4">
                             {teamQuotas
-                              .filter((q) => q.resource_type === 'cpu' || q.resource_type === 'memory')
+                              .filter(
+                                (q) => q.resource_type === 'cpu' || q.resource_type === 'memory',
+                              )
                               .map((q) => (
                                 <div
                                   key={q.resource_config_id}
@@ -514,7 +520,10 @@ Type "DELETE" to confirm:`;
                                     {q.display_name}
                                   </p>
                                   <p className="text-2xl font-bold">
-                                    {q.quota} <span className="text-sm text-text-secondary font-normal">{q.unit}</span>
+                                    {q.quota}{' '}
+                                    <span className="text-sm text-text-secondary font-normal">
+                                      {q.unit}
+                                    </span>
                                   </p>
                                 </div>
                               ))}
@@ -529,7 +538,9 @@ Type "DELETE" to confirm:`;
                             <span className="material-symbols-outlined text-text-secondary text-[20px]">
                               hard_drive
                             </span>
-                            <label className="text-text-foreground font-bold text-base">Storage</label>
+                            <label className="text-text-foreground font-bold text-base">
+                              Storage
+                            </label>
                           </div>
                           <div className="bg-background-dark border border-border-dark rounded-lg p-4">
                             <div className="space-y-3">
@@ -560,7 +571,9 @@ Type "DELETE" to confirm:`;
                             <span className="material-symbols-outlined text-text-secondary text-[20px]">
                               videogame_asset
                             </span>
-                            <label className="text-text-foreground font-bold text-base">GPU Resources</label>
+                            <label className="text-text-foreground font-bold text-base">
+                              GPU Resources
+                            </label>
                           </div>
                           <div className="bg-background-dark border border-border-dark rounded-lg p-4">
                             <div className="space-y-3">
@@ -575,7 +588,9 @@ Type "DELETE" to confirm:`;
                                       <span className="text-text-foreground text-sm font-medium">
                                         {q.display_name}
                                       </span>
-                                      <p className="text-text-secondary text-xs">{q.resource_name}</p>
+                                      <p className="text-text-secondary text-xs">
+                                        {q.resource_name}
+                                      </p>
                                     </div>
                                     <span className="text-text-foreground font-bold">
                                       {q.quota} {q.unit}
@@ -611,8 +626,8 @@ Type "DELETE" to confirm:`;
                       </span>
                       <p className="text-lg font-medium mb-2">No Team Assigned</p>
                       <p className="text-sm max-w-md mx-auto">
-                        You are not assigned to any team. Resource quotas are managed at the team level.
-                        Please contact an administrator to be assigned to a team.
+                        You are not assigned to any team. Resource quotas are managed at the team
+                        level. Please contact an administrator to be assigned to a team.
                       </p>
                     </div>
                   )}

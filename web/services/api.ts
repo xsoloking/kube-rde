@@ -368,7 +368,7 @@ export interface Service {
   external_port: number;
   workspace_id: string;
   agent_id?: string;
-  remote_proxy?: string; // Agent domain for web access (e.g., "agent-id.192-168-97-2.nip.io")
+  remote_proxy?: string; // Agent domain for web access (e.g., "agent-id.example.com")
   status: string;
   created_by_id: string;
   last_heartbeat?: string;
@@ -558,8 +558,7 @@ export interface UpdateTeamQuotaRequest {
 
 // Teams API (admin only)
 export const teamsApi = {
-  list: () =>
-    api.get<{ teams: Team[] }>('/api/admin/teams').then((res) => res.teams),
+  list: () => api.get<{ teams: Team[] }>('/api/admin/teams').then((res) => res.teams),
   get: (id: number) =>
     api.get<{ team: Team; member_count: number }>(`/api/admin/teams/${id}`).then((res) => res.team),
   create: (team: CreateTeamRequest) => api.post<Team>('/api/admin/teams', team),
@@ -572,7 +571,9 @@ export const teamsApi = {
   removeMember: (teamId: number, userId: string) =>
     api.delete(`/api/admin/teams/${teamId}/members/${userId}`),
   getQuota: (id: number) =>
-    api.get<{ team: Team; quotas: TeamQuotaItem[] }>(`/api/teams/${id}/quota`).then((res) => res.quotas),
+    api
+      .get<{ team: Team; quotas: TeamQuotaItem[] }>(`/api/teams/${id}/quota`)
+      .then((res) => res.quotas),
   updateQuota: (id: number, request: UpdateTeamQuotaRequest) =>
     api.put<{ message: string }>(`/api/admin/teams/${id}/quota`, request),
 };

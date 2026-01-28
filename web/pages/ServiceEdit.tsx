@@ -187,7 +187,10 @@ const ServiceEdit: React.FC = () => {
     <div className="p-8 lg:px-12 lg:py-6 max-w-[1000px] mx-auto w-full animate-fade-in space-y-8">
       {/* Breadcrumbs */}
       <nav className="flex items-center gap-3 text-xs font-medium">
-        <Link to="/workspaces" className="text-text-secondary hover:text-text-foreground transition-colors">
+        <Link
+          to="/workspaces"
+          className="text-text-secondary hover:text-text-foreground transition-colors"
+        >
           Workspaces
         </Link>
         <span className="material-symbols-outlined text-[14px] text-text-secondary">
@@ -252,7 +255,9 @@ const ServiceEdit: React.FC = () => {
           </span>
         </div>
         <div>
-          <h3 className="text-sm font-bold text-text-foreground">{template?.name || serviceName}</h3>
+          <h3 className="text-sm font-bold text-text-foreground">
+            {template?.name || serviceName}
+          </h3>
           <p className="text-xs text-text-secondary">
             ID: {id} | Agent Type: {agentType}
           </p>
@@ -376,7 +381,9 @@ const ServiceEdit: React.FC = () => {
                     <span className="material-symbols-outlined text-xl">developer_board</span>
                   </div>
                   <div>
-                    <h4 className="font-bold text-base text-text-foreground">Enable GPU Acceleration</h4>
+                    <h4 className="font-bold text-base text-text-foreground">
+                      Enable GPU Acceleration
+                    </h4>
                     <p className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">
                       Required for complex model training
                     </p>

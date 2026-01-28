@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { workspacesApi, Workspace, Service } from '../services/api';
+import { workspacesApi, Workspace, Service, systemConfigApi, SystemConfig } from '../services/api';
 
 const Workspaces: React.FC = () => {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -8,24 +8,29 @@ const Workspaces: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'newest' | 'name'>('newest');
+  const [systemConfig, setSystemConfig] = useState<SystemConfig | null>(null);
 
   useEffect(() => {
-    const fetchWorkspaces = async () => {
+    const fetchData = async () => {
       try {
         setLoading(true);
         setError(null);
-        const data = await workspacesApi.list();
-        setWorkspaces(data);
+        const [workspacesData, configData] = await Promise.all([
+          workspacesApi.list(),
+          systemConfigApi.get().catch(() => null), // Fail gracefully
+        ]);
+        setWorkspaces(workspacesData);
+        setSystemConfig(configData);
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to load workspaces';
+        const message = err instanceof Error ? err.message : 'Failed to load data';
         setError(message);
-        console.error('Failed to load workspaces:', err);
+        console.error('Failed to load data:', err);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchWorkspaces();
+    fetchData();
   }, []);
 
   const handleDeleteWorkspace = async (id: string) => {
@@ -92,9 +97,18 @@ const Workspaces: React.FC = () => {
       // Navigate to service detail
       window.location.href = `/#/services/${service.id}`;
     } else {
-      // Open Web Access URL using remote_proxy from server
-      const url = service.remote_proxy || `${service.agent_id}.192-168-97-2.nip.io`;
-      window.open(`http://${url}/`, '_blank');
+      // Open Web Access URL using remote_proxy from server or fallback to system config
+      const url = service.remote_proxy
+        ? service.remote_proxy
+        : systemConfig
+          ? `${service.agent_id}.${systemConfig.agent_domain}`
+          : null;
+
+      if (url) {
+        window.open(`http://${url}/`, '_blank');
+      } else {
+        alert('Service URL is not available yet. Please wait for the service to start.');
+      }
     }
   };
 
