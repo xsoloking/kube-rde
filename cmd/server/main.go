@@ -306,7 +306,7 @@ func generateAgentName(userID, userName, workspaceID, workspaceName, serviceName
 	hash := sha256.Sum256([]byte(hashInput))
 	hashStr := fmt.Sprintf("%x", hash[:4]) // First 4 bytes = 8 hex chars
 
-	var agentName string = fmt.Sprintf("kuberde-agent-%s-%s-%s-%s", userPart, workspacePart, servicePart, hashStr)
+	agentName := fmt.Sprintf("kuberde-agent-%s-%s-%s-%s", userPart, workspacePart, servicePart, hashStr)
 
 	return agentName
 }
@@ -4021,7 +4021,7 @@ func handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	if user.TeamID == nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"error":   "You must be a member of a team to create workspaces. Please contact your administrator to be assigned to a team.",
 			"message": "You must be a member of a team to create workspaces. Please contact your administrator to be assigned to a team.",
 		})
@@ -4646,7 +4646,7 @@ func handleCreateWorkspaceService(w http.ResponseWriter, r *http.Request) {
 	if user.TeamID == nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"error":   "You must be a member of a team to create services. Please contact your administrator to be assigned to a team.",
 			"message": "You must be a member of a team to create services. Please contact your administrator to be assigned to a team.",
 		})
@@ -8025,53 +8025,6 @@ func handleUpdateTeamQuota(w http.ResponseWriter, r *http.Request, teamID uint) 
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"message": "Team quotas updated successfully",
 	})
-}
-
-func applyTeamResourceQuota(team *models.Team, quotas []struct {
-	ResourceConfigID int `json:"resource_config_id"`
-	Quota            int `json:"quota"`
-}) error {
-	if k8sClientset == nil {
-		return fmt.Errorf("kubernetes client not initialized")
-	}
-
-	hard := corev1.ResourceList{}
-
-	for _, q := range quotas {
-		if q.Quota <= 0 {
-			continue
-		}
-		switch q.ResourceConfigID {
-		case 1: // CPU
-			hard[corev1.ResourceRequestsCPU] = resource.MustParse(fmt.Sprintf("%d", q.Quota))
-			hard[corev1.ResourceLimitsCPU] = resource.MustParse(fmt.Sprintf("%d", q.Quota))
-		case 2: // Memory
-			hard[corev1.ResourceRequestsMemory] = resource.MustParse(fmt.Sprintf("%dGi", q.Quota))
-			hard[corev1.ResourceLimitsMemory] = resource.MustParse(fmt.Sprintf("%dGi", q.Quota))
-		case 3: // Storage
-			hard[corev1.ResourceRequestsStorage] = resource.MustParse(fmt.Sprintf("%dGi", q.Quota))
-		}
-	}
-
-	if len(hard) == 0 {
-		return nil
-	}
-
-	rq := &corev1.ResourceQuota{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "team-quota",
-			Namespace: team.Namespace,
-		},
-		Spec: corev1.ResourceQuotaSpec{
-			Hard: hard,
-		},
-	}
-
-	_, err := k8sClientset.CoreV1().ResourceQuotas(team.Namespace).Create(context.Background(), rq, metav1.CreateOptions{})
-	if err != nil && strings.Contains(err.Error(), "already exists") {
-		_, err = k8sClientset.CoreV1().ResourceQuotas(team.Namespace).Update(context.Background(), rq, metav1.UpdateOptions{})
-	}
-	return err
 }
 
 // applyTeamResourceQuotaNew applies the team quota to Kubernetes namespace using the new model
