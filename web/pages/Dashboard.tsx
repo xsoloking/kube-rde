@@ -257,7 +257,7 @@ const Dashboard: React.FC = () => {
                 <p className="text-sm">No workspaces found</p>
               </div>
             ) : (
-              <div className="divide-y divide-border-dark/50 flex-1 overflow-y-auto max-h-[600px] scrollbar-hide">
+              <div className="divide-y divide-border-dark/30 flex-1 overflow-y-auto max-h-[600px] scrollbar-hide">
                 {recentWorkspaces.map((ws) => (
                   <Link
                     key={ws.id}
