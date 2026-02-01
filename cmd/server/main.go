@@ -7968,6 +7968,7 @@ func handleUpdateTeamQuota(w http.ResponseWriter, r *http.Request, teamID uint) 
 			ResourceConfigID int    `json:"resource_config_id"`
 			ResourceType     string `json:"resource_type"`
 			ResourceName     string `json:"resource_name"`
+			DisplayName      string `json:"display_name"`
 			Quota            int    `json:"quota"`
 		} `json:"quotas"`
 	}
@@ -7997,9 +7998,13 @@ func handleUpdateTeamQuota(w http.ResponseWriter, r *http.Request, teamID uint) 
 				LimitGi: q.Quota,
 			})
 		case q.ResourceType == "gpu" || q.ResourceConfigID >= 100:
+			modelName := q.DisplayName
+			if modelName == "" {
+				modelName = q.ResourceName
+			}
 			gpuQuotas = append(gpuQuotas, models.GPUQuotaItem{
 				Name:      q.ResourceName,
-				ModelName: q.ResourceName,
+				ModelName: modelName,
 				Limit:     q.Quota,
 			})
 		}

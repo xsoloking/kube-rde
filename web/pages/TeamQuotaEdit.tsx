@@ -59,6 +59,7 @@ const TeamQuotaEdit: React.FC = () => {
         resource_config_id: q.resource_config_id,
         resource_type: q.resource_type,
         resource_name: q.resource_name,
+        display_name: q.display_name,
         quota: quotaValues[q.resource_config_id] || 0,
       }));
 
