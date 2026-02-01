@@ -293,11 +293,14 @@ const WorkspaceDetail: React.FC = () => {
                       </td>
                       <td className="px-6 py-5">
                         <span
-                          className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest ${
+                          className={[
+                            'inline-flex items-center gap-1.5 px-2 py-0.5',
+                            'rounded-full text-[10px] font-bold uppercase',
+                            'tracking-widest',
                             svc.status === 'running'
                               ? 'bg-emerald-500/10 text-emerald-500'
-                              : 'bg-red-500/10 text-red-500'
-                          }`}
+                              : 'bg-red-500/10 text-red-500',
+                          ].join(' ')}
                         >
                           <span
                             className={`size-2 rounded-full ${svc.status === 'running' ? 'bg-emerald-500' : 'bg-red-500'}`}
