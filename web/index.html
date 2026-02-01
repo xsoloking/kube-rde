@@ -30,15 +30,14 @@
         theme: {
           extend: {
             colors: {
-              primary: 'var(--color-primary)',
-              'primary-dark': 'var(--color-primary-dark)',
-              // Semantic names mapped to variables
-              'background-dark': 'var(--color-background)', // Legacy name, now semantic
-              'surface-dark': 'var(--color-surface)', // Legacy name, now semantic
-              'surface-highlight': 'var(--color-surface-highlight)',
-              'border-dark': 'var(--color-border)', // Legacy name, now semantic
-              'text-secondary': 'var(--color-text-secondary)',
-              'text-foreground': 'var(--color-text-main)', // New semantic class
+              primary: 'rgb(var(--color-primary) / <alpha-value>)',
+              'primary-dark': 'rgb(var(--color-primary-dark) / <alpha-value>)',
+              'background-dark': 'rgb(var(--color-background) / <alpha-value>)',
+              'surface-dark': 'rgb(var(--color-surface) / <alpha-value>)',
+              'surface-highlight': 'rgb(var(--color-surface-highlight) / <alpha-value>)',
+              'border-dark': 'rgb(var(--color-border) / <alpha-value>)',
+              'text-secondary': 'rgb(var(--color-text-secondary) / <alpha-value>)',
+              'text-foreground': 'rgb(var(--color-text-main) / <alpha-value>)',
             },
             fontFamily: {
               display: ['Space Grotesk', 'sans-serif'],
@@ -51,30 +50,31 @@
     <style>
       :root {
         /* Light Mode (Default) Reference Colors: Slate */
-        --color-primary: #1a79ff;
-        --color-primary-dark: #1560cc;
+        /* Space-separated RGB values for Tailwind opacity support */
+        --color-primary: 26 121 255;
+        --color-primary-dark: 21 96 204;
 
-        --color-background: #f8fafc; /* Slate 50 */
-        --color-surface: #ffffff; /* White */
-        --color-surface-highlight: #f1f5f9; /* Slate 100 */
-        --color-border: #cbd5e1; /* Slate 300 */
+        --color-background: 248 250 252; /* Slate 50 */
+        --color-surface: 255 255 255; /* White */
+        --color-surface-highlight: 241 245 249; /* Slate 100 */
+        --color-border: 203 213 225; /* Slate 300 */
 
-        --color-text-main: #0f172a; /* Slate 900 */
-        --color-text-secondary: #64748b; /* Slate 500 */
+        --color-text-main: 15 23 42; /* Slate 900 */
+        --color-text-secondary: 100 116 139; /* Slate 500 */
       }
 
       .dark {
         /* Dark Mode (Original) */
-        --color-primary: #1a79ff;
-        --color-primary-dark: #1560cc;
+        --color-primary: 26 121 255;
+        --color-primary-dark: 21 96 204;
 
-        --color-background: #0f1723;
-        --color-surface: #1e2128;
-        --color-surface-highlight: #1a2636;
-        --color-border: #27272a;
+        --color-background: 15 23 35;
+        --color-surface: 30 33 40;
+        --color-surface-highlight: 26 38 54;
+        --color-border: 39 39 42;
 
-        --color-text-main: #ffffff;
-        --color-text-secondary: #8da8ce;
+        --color-text-main: 255 255 255;
+        --color-text-secondary: 141 168 206;
       }
 
       .material-symbols-outlined {
@@ -100,7 +100,7 @@
         height: 16px;
         width: 16px;
         border-radius: 50%;
-        background: var(--color-primary);
+        background: rgb(var(--color-primary));
         cursor: pointer;
         margin-top: -6px;
       }
@@ -108,21 +108,21 @@
         width: 100%;
         height: 4px;
         cursor: pointer;
-        background: var(--color-border);
+        background: rgb(var(--color-border));
         border-radius: 2px;
       }
       ::-webkit-scrollbar {
         width: 8px;
       }
       ::-webkit-scrollbar-track {
-        background: var(--color-background);
+        background: rgb(var(--color-background));
       }
       ::-webkit-scrollbar-thumb {
-        background: var(--color-border);
+        background: rgb(var(--color-border));
         border-radius: 4px;
       }
       ::-webkit-scrollbar-thumb:hover {
-        background: var(--color-primary);
+        background: rgb(var(--color-primary));
       }
     </style>
     <script type="importmap">
