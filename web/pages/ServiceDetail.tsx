@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 
 import { servicesApi, Service, systemConfigApi, SystemConfig } from '../services/api';
+import { useAdaptivePolling } from '../hooks/useAdaptivePolling';
 
 const ServiceDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -63,6 +64,25 @@ const ServiceDetail: React.FC = () => {
     fetchService();
   }, [id]);
 
+  const isTransitionalStatus = (status?: string) =>
+    !!status && !['running', 'stopped'].includes(status);
+
+  const pollService = useCallback(async () => {
+    if (!id) return;
+    try {
+      const data = await servicesApi.get(id);
+      setService(data);
+    } catch {
+      // Silently ignore polling errors
+    }
+  }, [id]);
+
+  const getPollInterval = useCallback(() => {
+    return isTransitionalStatus(service?.status) ? 5000 : 60000;
+  }, [service?.status]);
+
+  useAdaptivePolling(pollService, getPollInterval);
+
   // Fetch logs when service is loaded or container changes
   useEffect(() => {
     const fetchLogs = async () => {
@@ -107,10 +127,12 @@ const ServiceDetail: React.FC = () => {
   const isSSH = service.agent_type?.toLowerCase().trim() === 'ssh';
 
   // Helper to convert public_url to WebSocket URL
+  // Use current page protocol to determine ws/wss (handles TLS termination at ingress)
   const getWebSocketURL = () => {
     if (!systemConfig) return 'wss://frp.byai.uk';
-    const url = systemConfig.public_url.replace('https://', 'wss://').replace('http://', 'ws://');
-    return url;
+    const wsScheme = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+    const host = systemConfig.public_url.replace('https://', '').replace('http://', '');
+    return wsScheme + host;
   };
 
   const getServiceIcon = () => {
@@ -407,11 +429,10 @@ const ServiceDetail: React.FC = () => {
           <button
             onClick={handlePinToggle}
             disabled={actionLoading}
-            className={`flex items-center gap-2 px-4 py-2 text-[10px] font-bold uppercase tracking-widest rounded-lg border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-              service.is_pinned
-                ? 'bg-primary/10 text-primary border-primary/20 hover:bg-primary/20'
-                : 'bg-surface-highlight text-text-secondary border-border-dark hover:text-text-foreground hover:bg-white/10'
-            }`}
+            className={`flex items-center gap-2 px-4 py-2 text-[10px] font-bold uppercase tracking-widest rounded-lg border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${service.is_pinned
+              ? 'bg-primary/10 text-primary border-primary/20 hover:bg-primary/20'
+              : 'bg-surface-highlight text-text-secondary border-border-dark hover:text-text-foreground hover:bg-white/10'
+              }`}
             title={
               service.is_pinned
                 ? 'Unpin from Workspace Card'
@@ -595,7 +616,7 @@ const ServiceDetail: React.FC = () => {
                         {`Host ${service.agent_id.split('-ssh')[0]}
     HostName placeholder
     User root
-    ProxyCommand ./kuberde-cli connect ${getWebSocketURL()}/connect/${service.agent_id}
+    ProxyCommand ~/Downloads/kuberde-cli connect ${getWebSocketURL()}/connect/${service.agent_id}
     StrictHostKeyChecking no
     UserKnownHostsFile /dev/null`}
                       </code>
@@ -710,21 +731,19 @@ const ServiceDetail: React.FC = () => {
               <div className="flex gap-2">
                 <button
                   onClick={() => setLogsContainer('workload')}
-                  className={`px-3 py-1 text-[10px] font-bold uppercase tracking-widest rounded transition-all ${
-                    logsContainer === 'workload'
-                      ? 'bg-primary text-white'
-                      : 'bg-background-dark text-text-secondary hover:text-text-foreground'
-                  }`}
+                  className={`px-3 py-1 text-[10px] font-bold uppercase tracking-widest rounded transition-all ${logsContainer === 'workload'
+                    ? 'bg-primary text-white'
+                    : 'bg-background-dark text-text-secondary hover:text-text-foreground'
+                    }`}
                 >
                   Workload
                 </button>
                 <button
                   onClick={() => setLogsContainer('kuberde-agent')}
-                  className={`px-3 py-1 text-[10px] font-bold uppercase tracking-widest rounded transition-all ${
-                    logsContainer === 'kuberde-agent'
-                      ? 'bg-primary text-white'
-                      : 'bg-background-dark text-text-secondary hover:text-text-foreground'
-                  }`}
+                  className={`px-3 py-1 text-[10px] font-bold uppercase tracking-widest rounded transition-all ${logsContainer === 'kuberde-agent'
+                    ? 'bg-primary text-white'
+                    : 'bg-background-dark text-text-secondary hover:text-text-foreground'
+                    }`}
                 >
                   Agent
                 </button>

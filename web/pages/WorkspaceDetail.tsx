@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import {
   workspacesApi,
@@ -8,6 +8,7 @@ import {
   systemConfigApi,
   SystemConfig,
 } from '../services/api';
+import { useAdaptivePolling } from '../hooks/useAdaptivePolling';
 
 const WorkspaceDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -48,6 +49,25 @@ const WorkspaceDetail: React.FC = () => {
 
     fetchData();
   }, [id]);
+
+  const pollServices = useCallback(async () => {
+    if (!id) return;
+    try {
+      const svcs = await servicesApi.listByWorkspace(id);
+      setServices(svcs);
+    } catch {
+      // Silently ignore polling errors
+    }
+  }, [id]);
+
+  const getPollInterval = useCallback(() => {
+    const hasTransitional = services.some(
+      (s) => !!s.status && !['running', 'stopped'].includes(s.status),
+    );
+    return hasTransitional ? 5000 : 60000;
+  }, [services]);
+
+  useAdaptivePolling(pollServices, getPollInterval);
 
   const handleDeleteWorkspace = async () => {
     if (

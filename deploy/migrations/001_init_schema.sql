@@ -319,7 +319,7 @@ INSERT INTO agent_templates (
     '--noauth',
     '{}'::jsonb,
     '{"runAsUser": 0, "runAsGroup": 0, "fsGroup": 0}'::jsonb,
-    '[{"name": "workspace", "mountPath": "/root", "readOnly": false}]'::jsonb
+    '[{"name": "workspace", "mountPath": "/srv", "readOnly": false}]'::jsonb
 ),
 -- Coder Server (VS Code)
 (
