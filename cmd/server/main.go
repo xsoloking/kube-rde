@@ -3898,6 +3898,11 @@ func handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
 							default:
 								service.Status = "unknown"
 							}
+							if service.Status == "error" {
+								if msg, ok := status["message"].(string); ok {
+									service.StatusMessage = msg
+								}
+							}
 							continue
 						}
 					}
@@ -4413,6 +4418,11 @@ func handleListWorkspaceServices(w http.ResponseWriter, r *http.Request) {
 							services[i].Status = "error"
 						default:
 							services[i].Status = "unknown"
+						}
+						if services[i].Status == "error" {
+							if msg, ok := status["message"].(string); ok {
+								services[i].StatusMessage = msg
+							}
 						}
 						continue
 					}
@@ -5892,6 +5902,11 @@ func handleGetService(w http.ResponseWriter, r *http.Request, serviceID string) 
 					default:
 						service.Status = "unknown"
 					}
+					if service.Status == "error" {
+						if msg, ok := status["message"].(string); ok {
+							service.StatusMessage = msg
+						}
+					}
 				} else {
 					log.Printf("[handleGetService] Phase field not found or not string in status")
 				}
@@ -6985,6 +7000,11 @@ func handleAdminListWorkspaces(w http.ResponseWriter, r *http.Request) {
 								service.Status = "error"
 							default:
 								service.Status = "unknown"
+							}
+							if service.Status == "error" {
+								if msg, ok := status["message"].(string); ok {
+									service.StatusMessage = msg
+								}
 							}
 							continue
 						}

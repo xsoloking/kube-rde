@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -107,6 +108,18 @@ func (c *Controller) computeStatus(ctx context.Context, cr *unstructured.Unstruc
 		logger.LogPhaseWithDuration("get_pod_complete", podDuration, map[string]interface{}{
 			"pods_found": 0,
 		})
+
+		// Check Deployment conditions for ReplicaFailure (e.g., quota exceeded)
+		for _, condition := range deployment.Status.Conditions {
+			if condition.Type == appsv1.DeploymentReplicaFailure && condition.Status == corev1.ConditionTrue {
+				result.Phase = "Error"
+				result.Message = fmt.Sprintf("Deployment error: %s", condition.Message)
+				result.Online = false
+				result.ComputationTime = time.Since(startTime)
+				return result, nil
+			}
+		}
+
 		result.Phase = "Pending"
 		result.Message = "No pods running yet"
 		result.Online = false

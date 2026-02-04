@@ -1,4 +1,16 @@
 ---
+# Traefik Middleware to force HTTP protocol in forwarded headers
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: force-http-headers
+  namespace: ${NAMESPACE}
+spec:
+  headers:
+    customRequestHeaders:
+      X-Forwarded-Proto: "http"
+      X-Forwarded-Port: "80"
+---
 # 主域名和 SSO 的 Ingress
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -7,10 +19,9 @@ metadata:
   namespace: ${NAMESPACE}
   annotations:
     kubernetes.io/ingress.class: traefik
-    traefik.ingress.kubernetes.io/router.entrypoints: websecure
-    traefik.ingress.kubernetes.io/router.tls.certresolver: letsencrypt
-    external-dns.alpha.kubernetes.io/hostname: ${KUBERDE_PUBLIC_DOMAIN},${KEYCLOAK_DOMAIN}
-    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    # Lower priority for wildcard
+    traefik.ingress.kubernetes.io/router.priority: "50"
 spec:
   rules:
   - host: ${KUBERDE_PUBLIC_DOMAIN}
@@ -22,35 +33,35 @@ spec:
           service:
             name: kuberde-server
             port:
-              number: 8080
+              number: 80
       - path: /connect
         pathType: Prefix
         backend:
           service:
             name: kuberde-server
             port:
-              number: 8080
+              number: 80
       - path: /auth
         pathType: Prefix
         backend:
           service:
             name: kuberde-server
             port:
-              number: 8080
+              number: 80
       - path: /mgmt
         pathType: Prefix
         backend:
           service:
             name: kuberde-server
             port:
-              number: 8080
+              number: 80
       - path: /api
         pathType: Prefix
         backend:
           service:
             name: kuberde-server
             port:
-              number: 8080
+              number: 80
       - path: /
         pathType: Prefix
         backend:
@@ -58,30 +69,6 @@ spec:
             name: kuberde-web
             port:
               number: 80
-  - host: ${KEYCLOAK_DOMAIN}
-    http:
-      paths:
-      - path: /realms
-        pathType: Prefix
-        backend:
-          service:
-            name: keycloak
-            port:
-              number: 8080
-      - path: /resources
-        pathType: Prefix
-        backend:
-          service:
-            name: keycloak
-            port:
-              number: 8080
-      - path: /robots.txt
-        pathType: Prefix
-        backend:
-          service:
-            name: keycloak
-            port:
-              number: 8080
   - host: "*.${KUBERDE_AGENT_DOMAIN}"
     http:
       paths:
@@ -91,10 +78,29 @@ spec:
           service:
             name: kuberde-server
             port:
+              number: 80
+---
+# Separate Ingress for Keycloak with higher priority
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kuberde-keycloak-ingress
+  namespace: ${NAMESPACE}
+  annotations:
+    kubernetes.io/ingress.class: traefik
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    # Higher priority than wildcard
+    traefik.ingress.kubernetes.io/router.priority: "100"
+spec:
+  rules:
+  # Keycloak subdomain: sso.192-168-97-2.nip.io
+  - host: ${KEYCLOAK_DOMAIN}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: keycloak
+            port:
               number: 8080
-  tls:
-  - hosts:
-    - ${KUBERDE_PUBLIC_DOMAIN}
-    - "*.${KUBERDE_PUBLIC_DOMAIN}"
-  - hosts:
-    - ${KEYCLOAK_DOMAIN}

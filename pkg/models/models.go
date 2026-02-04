@@ -74,7 +74,8 @@ type Service struct {
 	LocalTarget   string       `json:"local_target"` // e.g., 127.0.0.1:22
 	ExternalPort  int          `json:"external_port"`
 	AgentID       string       `json:"agent_id"`
-	Status        string       `json:"status"` // running, stopped, error
+	Status        string       `json:"status"`                            // running, stopped, error
+	StatusMessage string       `gorm:"-" json:"status_message,omitempty"` // transient: error details from CR
 	CreatedByID   string       `json:"created_by_id"`
 	CreatedBy     *User        `json:"created_by,omitempty"`
 	CreatedAt     time.Time    `json:"created_at"`

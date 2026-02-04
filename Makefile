@@ -248,7 +248,7 @@ deploy-ingress:
 deploy-postgresql:
 	@echo "$(BLUE)Deploying PostgreSQL...$(NC)"
 	@# Delete existing statefulset to handle immutable selector changes
-	@$(KUBECTL) delete statefulset postgresql -n $(NAMESPACE) --ignore-not-found=true 2>/dev/null || true
+# 	@$(KUBECTL) delete statefulset postgresql -n $(NAMESPACE) --ignore-not-found=true 2>/dev/null || true
 	@envsubst < $(K8S_DIR)/06-postgresql.yaml | $(KUBECTL) apply -f -
 	@echo "$(GREEN)✓ PostgreSQL deployed$(NC)"
 

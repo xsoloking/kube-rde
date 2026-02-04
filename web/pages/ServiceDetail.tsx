@@ -481,6 +481,17 @@ const ServiceDetail: React.FC = () => {
         </div>
       </div>
 
+      {/* Status Warning Banner */}
+      {service.status_message && (
+        <div className="bg-orange-500/10 border border-orange-500/20 rounded-xl p-4 flex items-start gap-3">
+          <span className="material-symbols-outlined text-orange-400 mt-0.5 flex-shrink-0">warning</span>
+          <div>
+            <p className="text-orange-400 text-xs font-bold uppercase tracking-widest">Deployment Warning</p>
+            <p className="text-orange-300/80 text-sm mt-1 font-mono">{service.status_message}</p>
+          </div>
+        </div>
+      )}
+
       {/* Connect Section - Unified background for consistency */}
       <div className="space-y-6">
         <h3 className="flex items-center gap-2 text-primary font-bold text-sm uppercase tracking-widest">
@@ -623,7 +634,7 @@ const ServiceDetail: React.FC = () => {
                       <button
                         onClick={() =>
                           copyToClipboard(
-                            `Host ${service.agent_id.split('-ssh')[0]}\n    HostName placeholder\n    User root\n    ProxyCommand ./kuberde-cli connect ${getWebSocketURL()}/connect/${service.agent_id}\n    StrictHostKeyChecking no\n    UserKnownHostsFile /dev/null`,
+                            `Host ${service.agent_id.split('-ssh')[0]}\n    HostName placeholder\n    User root\n    ProxyCommand ~/Downloads/kuberde-cli connect ${getWebSocketURL()}/connect/${service.agent_id}\n    StrictHostKeyChecking no\n    UserKnownHostsFile /dev/null`,
                             setCopiedSSHConfig,
                           )
                         }

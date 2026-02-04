@@ -253,6 +253,21 @@ const WorkspaceDetail: React.FC = () => {
           )}
         </div>
 
+        {/* Quota/Error Warning Banner */}
+        {services.some((s) => s.status === 'error' && s.status_message) && (
+          <div className="bg-orange-500/10 border border-orange-500/20 rounded-xl p-4 flex items-start gap-3">
+            <span className="material-symbols-outlined text-orange-400 mt-0.5 flex-shrink-0">warning</span>
+            <div>
+              <p className="text-orange-400 text-xs font-bold uppercase tracking-widest">
+                {services.filter((s) => s.status === 'error' && s.status_message).length} service{services.filter((s) => s.status === 'error' && s.status_message).length > 1 ? 's' : ''} with deployment errors
+              </p>
+              <p className="text-orange-300/80 text-xs mt-1">
+                Check individual services below for details.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Services Table */}
         {filteredServices.length === 0 ? (
           <div className="text-center py-20">
@@ -327,6 +342,14 @@ const WorkspaceDetail: React.FC = () => {
                           ></span>
                           {svc.status}
                         </span>
+                        {svc.status_message && (
+                          <span
+                            className="material-symbols-outlined text-orange-400 text-[16px] ml-1 cursor-help"
+                            title={svc.status_message}
+                          >
+                            warning
+                          </span>
+                        )}
                       </td>
                       <td className="px-6 py-5">
                         {svc.agent_type ? (

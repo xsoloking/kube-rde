@@ -55,7 +55,10 @@ const TeamManagement: React.FC = () => {
       const data = await teamsApi.list();
       setTeams(data || []);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to load teams';
+      const message =
+        err && typeof err === 'object' && 'message' in err
+          ? (err as { message: string }).message
+          : 'Failed to load teams';
       setError(message);
       console.error('Failed to load teams:', err);
     } finally {
@@ -77,7 +80,10 @@ const TeamManagement: React.FC = () => {
       setNewTeam({ name: '', display_name: '' });
       await loadTeams();
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to create team';
+      const message =
+        err && typeof err === 'object' && 'message' in err
+          ? (err as { message: string }).message
+          : 'Failed to create team';
       alert('Error: ' + message);
     } finally {
       setCreating(false);
@@ -104,7 +110,10 @@ const TeamManagement: React.FC = () => {
       setEditingTeam(null);
       await loadTeams();
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to update team';
+      const message =
+        err && typeof err === 'object' && 'message' in err
+          ? (err as { message: string }).message
+          : 'Failed to update team';
       alert('Error: ' + message);
     } finally {
       setSaving(false);
@@ -143,7 +152,10 @@ const TeamManagement: React.FC = () => {
       setMembers(data || []);
       setShowAddMemberDropdown(false);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to add member';
+      const message =
+        err && typeof err === 'object' && 'message' in err
+          ? (err as { message: string }).message
+          : 'Failed to add member';
       alert('Error: ' + message);
     } finally {
       setAddingMember(false);
@@ -160,7 +172,10 @@ const TeamManagement: React.FC = () => {
       const data = await teamsApi.getMembers(membersTeam.id);
       setMembers(data || []);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to remove member';
+      const message =
+        err && typeof err === 'object' && 'message' in err
+          ? (err as { message: string }).message
+          : 'Failed to remove member';
       alert('Error: ' + message);
     }
   };

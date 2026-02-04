@@ -370,6 +370,7 @@ export interface Service {
   agent_id?: string;
   remote_proxy?: string; // Agent domain for web access (e.g., "agent-id.example.com")
   status: string;
+  status_message?: string;
   created_by_id: string;
   last_heartbeat?: string;
   created_at: string;
