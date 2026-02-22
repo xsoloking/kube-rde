@@ -256,10 +256,16 @@ const WorkspaceDetail: React.FC = () => {
         {/* Quota/Error Warning Banner */}
         {services.some((s) => s.status === 'error' && s.status_message) && (
           <div className="bg-orange-500/10 border border-orange-500/20 rounded-xl p-4 flex items-start gap-3">
-            <span className="material-symbols-outlined text-orange-400 mt-0.5 flex-shrink-0">warning</span>
+            <span className="material-symbols-outlined text-orange-400 mt-0.5 flex-shrink-0">
+              warning
+            </span>
             <div>
               <p className="text-orange-400 text-xs font-bold uppercase tracking-widest">
-                {services.filter((s) => s.status === 'error' && s.status_message).length} service{services.filter((s) => s.status === 'error' && s.status_message).length > 1 ? 's' : ''} with deployment errors
+                {services.filter((s) => s.status === 'error' && s.status_message).length} service
+                {services.filter((s) => s.status === 'error' && s.status_message).length > 1
+                  ? 's'
+                  : ''}{' '}
+                with deployment errors
               </p>
               <p className="text-orange-300/80 text-xs mt-1">
                 Check individual services below for details.

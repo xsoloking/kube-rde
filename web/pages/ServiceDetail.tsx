@@ -429,10 +429,11 @@ const ServiceDetail: React.FC = () => {
           <button
             onClick={handlePinToggle}
             disabled={actionLoading}
-            className={`flex items-center gap-2 px-4 py-2 text-[10px] font-bold uppercase tracking-widest rounded-lg border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${service.is_pinned
-              ? 'bg-primary/10 text-primary border-primary/20 hover:bg-primary/20'
-              : 'bg-surface-highlight text-text-secondary border-border-dark hover:text-text-foreground hover:bg-white/10'
-              }`}
+            className={`flex items-center gap-2 px-4 py-2 text-[10px] font-bold uppercase tracking-widest rounded-lg border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+              service.is_pinned
+                ? 'bg-primary/10 text-primary border-primary/20 hover:bg-primary/20'
+                : 'bg-surface-highlight text-text-secondary border-border-dark hover:text-text-foreground hover:bg-white/10'
+            }`}
             title={
               service.is_pinned
                 ? 'Unpin from Workspace Card'
@@ -484,9 +485,13 @@ const ServiceDetail: React.FC = () => {
       {/* Status Warning Banner */}
       {service.status_message && (
         <div className="bg-orange-500/10 border border-orange-500/20 rounded-xl p-4 flex items-start gap-3">
-          <span className="material-symbols-outlined text-orange-400 mt-0.5 flex-shrink-0">warning</span>
+          <span className="material-symbols-outlined text-orange-400 mt-0.5 flex-shrink-0">
+            warning
+          </span>
           <div>
-            <p className="text-orange-400 text-xs font-bold uppercase tracking-widest">Deployment Warning</p>
+            <p className="text-orange-400 text-xs font-bold uppercase tracking-widest">
+              Deployment Warning
+            </p>
             <p className="text-orange-300/80 text-sm mt-1 font-mono">{service.status_message}</p>
           </div>
         </div>
@@ -742,19 +747,21 @@ const ServiceDetail: React.FC = () => {
               <div className="flex gap-2">
                 <button
                   onClick={() => setLogsContainer('workload')}
-                  className={`px-3 py-1 text-[10px] font-bold uppercase tracking-widest rounded transition-all ${logsContainer === 'workload'
-                    ? 'bg-primary text-white'
-                    : 'bg-background-dark text-text-secondary hover:text-text-foreground'
-                    }`}
+                  className={`px-3 py-1 text-[10px] font-bold uppercase tracking-widest rounded transition-all ${
+                    logsContainer === 'workload'
+                      ? 'bg-primary text-white'
+                      : 'bg-background-dark text-text-secondary hover:text-text-foreground'
+                  }`}
                 >
                   Workload
                 </button>
                 <button
                   onClick={() => setLogsContainer('kuberde-agent')}
-                  className={`px-3 py-1 text-[10px] font-bold uppercase tracking-widest rounded transition-all ${logsContainer === 'kuberde-agent'
-                    ? 'bg-primary text-white'
-                    : 'bg-background-dark text-text-secondary hover:text-text-foreground'
-                    }`}
+                  className={`px-3 py-1 text-[10px] font-bold uppercase tracking-widest rounded transition-all ${
+                    logsContainer === 'kuberde-agent'
+                      ? 'bg-primary text-white'
+                      : 'bg-background-dark text-text-secondary hover:text-text-foreground'
+                  }`}
                 >
                   Agent
                 </button>

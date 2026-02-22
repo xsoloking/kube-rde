@@ -156,20 +156,33 @@ _Demo screenshots and videos coming soon!_
 The fastest way to try KubeRDE without any cloud setup:
 
 ```bash
-# Using k3d (Kubernetes in Docker)
-k3d create cluster kuberde
+# install helm
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-4 | bash
+
+# Using k3s or k3d (Kubernetes in Docker)
+# Install k3s
+curl -sfL https://get.k3s.io | sh - 
+# Or install k3d and create a cluster if you have docker installed
+# curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+# k3d create cluster kuberde
+
+# Check for Ready node, takes ~30 seconds 
+k3s kubectl get node -o wide
 
 # check k3d cluster load balancer ip
-kubectl get svc -A -o wide | grep traefik
+k3s kubectl get svc -A -o wide | grep traefik
 
-# Deploy KubeRDE ( assume the ip address is 192.168.107.2)
-helm install kuberde charts/kuberde -f values-http.yaml --namespace kuberde --create-namespace \
-  --set global.domain=192.168.107.2.nip.io \
-  --set global.keycloakDomain=sso.192.168.107.2.nip.io \
-  --set global.agentDomain=*.192.168.107.2.nip.io \
+# copy kubeconfig to local
+cat /etc/rancher/k3s/k3s.yaml > ~/.kube/config
+
+# Deploy KubeRDE ( assume the ip address is 192.168.139.82)
+helm upgrade --install kuberde charts/kuberde -f charts/kuberde/values-http.yaml --namespace kuberde --create-namespace \
+  --set global.domain=192.168.139.82.nip.io \
+  --set global.keycloakDomain=sso.192.168.139.82.nip.io \
+  --set global.agentDomain=192.168.139.82.nip.io \
   --set global.protocol=http
 
-# Access at http://192.168.107.2.nip.io
+# Access at http://192.168.139.82.nip.io
 # Login: admin / password
 ```
 
