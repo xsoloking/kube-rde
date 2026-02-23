@@ -141,17 +141,14 @@ Create reusable workspace templates with pre-configured settings for your team:
 
 ## 🎬 See It In Action
 
-<!-- ![KubeRDE Demo](docs/images/demo.gif) -->
+[📺 Watch 5-minute overview](https://youtu.be/qeA03UCNYoQ)
 
-_Demo screenshots and videos coming soon!_
-
-<!-- Uncomment when ready:
-[📺 Watch 5-minute overview](https://youtube.com/...)
--->
 
 ## 🏃 Quick Start
 
 ### Try It Locally (5 Minutes)
+
+[📺 Watch local deployment demo](https://youtu.be/aeXvcPuDAYQ)
 
 The fastest way to try KubeRDE without any cloud setup:
 
@@ -169,10 +166,10 @@ curl -sfL https://get.k3s.io | sh -
 # Check for Ready node, takes ~30 seconds 
 k3s kubectl get node -o wide
 
-# check k3d cluster load balancer ip
+# Check k3d cluster load balancer ip
 k3s kubectl get svc -A -o wide | grep traefik
 
-# copy kubeconfig to local
+# Copy kubeconfig to local (optional for k3d)
 cat /etc/rancher/k3s/k3s.yaml > ~/.kube/config
 
 # Deploy KubeRDE ( assume the ip address is 192.168.139.82)
