@@ -185,67 +185,10 @@ helm upgrade --install kuberde charts/kuberde -f charts/kuberde/values-http.yaml
 
 See [Local Kubernetes Guide](docs/platforms/local-k8s.md) for detailed instructions with kind, minikube, k3d, or Docker Desktop.
 
-### Deploy to Production
-
-Choose your platform for detailed deployment instructions:
-
-<table>
-  <tr>
-    <td align="center"><strong>🔵 Google Cloud</strong></td>
-    <td align="center"><strong>🟠 AWS</strong></td>
-    <td align="center"><strong>🔷 Azure</strong></td>
-    <td align="center"><strong>🐳 Your Cluster</strong></td>
-  </tr>
-  <tr>
-    <td align="center"><a href="docs/platforms/gcp-gke.md">GKE Guide</a></td>
-    <td align="center"><a href="docs/platforms/aws-eks.md">EKS Guide</a></td>
-    <td align="center"><a href="docs/platforms/azure-aks.md">AKS Guide</a></td>
-    <td align="center"><a href="docs/QUICK_START.md">Generic Guide</a></td>
-  </tr>
-</table>
-
-**One-line Terraform deployment:**
-```bash
-# For GCP
-cd terraform/gcp/complete && terraform init && terraform apply
-
-# For AWS
-cd terraform/aws/complete && terraform init && terraform apply
-
-# For Azure
-cd terraform/azure/complete && terraform init && terraform apply
-```
 
 ## 🏗️ Architecture
 
-```
-┌─────────────────┐
-│   Browser       │  ──HTTPS──▶  Ingress (TLS)
-└─────────────────┘                    │
-                                       ▼
-                         ┌─────────────────────────┐
-                         │  KubeRDE Server         │
-                         │  - REST API             │
-                         │  - WebSocket Relay      │
-                         │  - OIDC Auth           │
-                         └─────────────────────────┘
-                                       │
-                         ┌─────────────┴─────────────┐
-                         ▼                           ▼
-              ┌──────────────────┐       ┌──────────────────┐
-              │  PostgreSQL      │       │  Keycloak        │
-              │  (State)         │       │  (Auth)          │
-              └──────────────────┘       └──────────────────┘
-                                       │
-                         ┌─────────────┴─────────────┐
-                         ▼                           ▼
-              ┌──────────────────┐       ┌──────────────────┐
-              │  Operator        │       │  Agent Pods      │
-              │  (Lifecycle)     │       │  - User Code     │
-              │                  │       │  - VS Code/SSH   │
-              └──────────────────┘       │  - Jupyter       │
-                                         └──────────────────┘
-```
+![Architecture Overview](docs/media/diagrams/architecture-overview.png)
 
 **Key Components:**
 
