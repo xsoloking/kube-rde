@@ -6900,7 +6900,57 @@ func createRDEAgentFromTemplate(ctx context.Context, service *models.Service, te
 	}
 
 	log.Printf("✓ Created RDEAgent CR %s in namespace %s from template %s", crName, targetNamespace, template.AgentType)
+
+	// Karmada: route agent to member cluster if configured
+	if karmadaEnabled && team != nil && team.ClusterName != "" && team.ClusterName != "default" {
+		if err := createRDEAgentPropagationPolicy(ctx, crName, targetNamespace, team.ClusterName); err != nil {
+			log.Printf("WARNING: Failed to create PropagationPolicy for %s: %v", crName, err)
+		}
+	}
+
 	return crName, nil
+}
+
+// createRDEAgentPropagationPolicy creates a Karmada PropagationPolicy to route
+// the RDEAgent CR to the specified member cluster.
+func createRDEAgentPropagationPolicy(ctx context.Context, agentName, namespace, clusterName string) error {
+	policy := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "policy.karmada.io/v1alpha1",
+			"kind":       "PropagationPolicy",
+			"metadata": map[string]interface{}{
+				"name":      agentName,
+				"namespace": namespace,
+				"labels": map[string]interface{}{
+					"kuberde.io/agent": agentName,
+				},
+			},
+			"spec": map[string]interface{}{
+				"resourceSelectors": []interface{}{
+					map[string]interface{}{
+						"apiVersion": "kuberde.io/v1beta1",
+						"kind":       "RDEAgent",
+						"name":       agentName,
+					},
+				},
+				"placement": map[string]interface{}{
+					"clusterAffinity": map[string]interface{}{
+						"clusterNames": []interface{}{clusterName},
+					},
+				},
+				"propagateDeps": true,
+			},
+		},
+	}
+
+	_, err := karmadaClient.Resource(propagationPolicyGVR).
+		Namespace(namespace).
+		Create(ctx, policy, metav1.CreateOptions{})
+	if err != nil && !strings.Contains(err.Error(), "already exists") {
+		return fmt.Errorf("create PropagationPolicy for agent %s: %w", agentName, err)
+	}
+	log.Printf("✓ Created PropagationPolicy for agent %s → cluster %s", agentName, clusterName)
+	return nil
 }
 
 func updateRDEAgentSpec(ctx context.Context, service *models.Service) error {
