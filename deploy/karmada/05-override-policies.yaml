@@ -1,0 +1,47 @@
+# deploy/karmada/05-override-policies.yaml
+#
+# Per-cluster storage class OverridePolicy examples.
+# Administrators should create one OverridePolicy per member cluster to map
+# the RDEAgent PVC storageClassName to whatever storage class that cluster provides.
+#
+# Apply with:
+#   kubectl apply -f deploy/karmada/05-override-policies.yaml \
+#     --kubeconfig=/tmp/karmada.kubeconfig
+---
+# cluster-a: uses "premium-ssd" storage class
+apiVersion: policy.karmada.io/v1alpha1
+kind: OverridePolicy
+metadata:
+  name: cluster-a-storage-override
+  namespace: kuberde-alpha   # scope to team namespace; repeat per team namespace as needed
+spec:
+  resourceSelectors:
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+  targetCluster:
+    clusterNames:
+    - cluster-a
+  overriders:
+    plaintext:
+    - path: "/spec/storageClassName"
+      op: replace
+      value: "premium-ssd"
+---
+# cluster-b: GPU cluster with local NVMe storage
+apiVersion: policy.karmada.io/v1alpha1
+kind: OverridePolicy
+metadata:
+  name: cluster-b-storage-override
+  namespace: kuberde-beta
+spec:
+  resourceSelectors:
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+  targetCluster:
+    clusterNames:
+    - cluster-b
+  overriders:
+    plaintext:
+    - path: "/spec/storageClassName"
+      op: replace
+      value: "local-nvme"
