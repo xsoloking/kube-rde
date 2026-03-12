@@ -8473,6 +8473,70 @@ func createTeamNamespace(team *models.Team) error {
 	if err := copyAgentAuthSecretToNamespace(team.Namespace); err != nil {
 		log.Printf("WARNING: Failed to copy agent auth secret to team namespace: %v", err)
 	}
+
+	// Karmada multi-cluster: propagate namespace and secret to member cluster
+	if karmadaEnabled && team.ClusterName != "" && team.ClusterName != "default" {
+		if err := propagateTeamNamespaceToCluster(team); err != nil {
+			log.Printf("WARNING: Failed to propagate namespace %s to cluster %s: %v",
+				team.Namespace, team.ClusterName, err)
+			// Non-fatal: namespace was created on hub; propagation failure does not block
+		}
+	}
+	return nil
+}
+
+// propagateTeamNamespaceToCluster creates a Karmada ClusterPropagationPolicy to propagate
+// the team's namespace and auth secret to the specified member cluster.
+func propagateTeamNamespaceToCluster(team *models.Team) error {
+	policyName := "team-" + team.Name + "-ns"
+	agentAuthSecret := os.Getenv("KUBERDE_AGENT_AUTH_SECRET")
+	if agentAuthSecret == "" {
+		agentAuthSecret = "kuberde-agents-auth"
+	}
+
+	resourceSelectors := []interface{}{
+		map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Namespace",
+			"name":       team.Namespace,
+		},
+	}
+	if agentAuthSecret != "" {
+		resourceSelectors = append(resourceSelectors, map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"name":       agentAuthSecret,
+			"namespace":  team.Namespace,
+		})
+	}
+
+	policy := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "policy.karmada.io/v1alpha1",
+			"kind":       "ClusterPropagationPolicy",
+			"metadata": map[string]interface{}{
+				"name": policyName,
+				"labels": map[string]interface{}{
+					"kuberde.io/team": team.Name,
+				},
+			},
+			"spec": map[string]interface{}{
+				"resourceSelectors": resourceSelectors,
+				"placement": map[string]interface{}{
+					"clusterAffinity": map[string]interface{}{
+						"clusterNames": []interface{}{team.ClusterName},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := karmadaClient.Resource(clusterPropagationPolicyGVR).
+		Create(context.Background(), policy, metav1.CreateOptions{})
+	if err != nil && !strings.Contains(err.Error(), "already exists") {
+		return fmt.Errorf("create ClusterPropagationPolicy %s: %w", policyName, err)
+	}
+	log.Printf("✓ Propagated namespace %s to cluster %s", team.Namespace, team.ClusterName)
 	return nil
 }
 
