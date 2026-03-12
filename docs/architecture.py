@@ -12,7 +12,9 @@ Usage:
     python docs/architecture.py
 
 Output:
-    docs/kuberde_architecture.png - The generated architecture diagram
+    docs/kuberde_architecture.png       - Main system architecture
+    docs/kuberde_data_flow.png          - Connection data flow (DERP + WebSocket paths)
+    docs/kuberde_operator_lifecycle.png - Operator reconciliation lifecycle
 """
 
 from diagrams import Diagram, Cluster, Edge
@@ -34,7 +36,7 @@ graph_attr = {
     "pad": "0.5",
 }
 
-# Main architecture diagram
+# ─── Diagram 1: Main Architecture ─────────────────────────────────────────────
 with Diagram(
     "KubeRDE Architecture",
     filename="docs/kuberde_architecture",
@@ -46,8 +48,8 @@ with Diagram(
 
     # External users
     with Cluster("Users"):
-        web_user = User("Web User")
-        cli_user = User("CLI User")
+        web_user = User("Web User\n(Browser)")
+        cli_user = User("CLI / SSH User")
 
     # Frontend layer
     with Cluster("Frontend Layer"):
@@ -61,18 +63,20 @@ with Diagram(
     with Cluster("Authentication"):
         keycloak = Ansible("Keycloak\n(OIDC Provider)")
 
-    # Core server
-    with Cluster("KubeRDE Server (Go)"):
-        server = Server("Server\n:8080")
+    # HA Server — 3 replicas, each with embedded DERP relay
+    with Cluster("KubeRDE Server — 3 Replicas (HA)"):
+        server = Server("Server Pods\n:8080")
         server_components = [
             Go("REST API\n(/api/*)"),
-            Go("WebSocket\n(/ws)"),
+            Go("WebSocket Relay\n(/ws, /connect/*)"),
+            Go("DERP Relay\n(/derp, /derp-pod/{ip})"),
             Go("Management API\n(/mgmt/*)"),
-            Go("HTTP Proxy\n(Agent Traffic)")
+            Go("Inter-Pod Fwd\n(httputil.ReverseProxy)"),
         ]
 
-    # Database
-    database = PostgreSQL("PostgreSQL\n(Persistence)")
+    # Shared database — stores both application state and agent session mapping
+    with Cluster("Shared State"):
+        database = PostgreSQL("PostgreSQL\n(app data +\nagent_pod_sessions)")
 
     # Kubernetes cluster
     with Cluster("Kubernetes Cluster"):
@@ -89,7 +93,7 @@ with Diagram(
 
             with Cluster("Agent Deployment"):
                 agent_deployment = Deployment("Agent Deployment")
-                agent_pod = Pod("Agent Pod\n(Go + Yamux)")
+                agent_pod = Pod("Agent Pod\n(Go + Yamux + WireGuard key)")
                 agent_pvc = PVC("Workspace PVC")
                 agent_pv = PV("Persistent Volume")
 
@@ -97,50 +101,81 @@ with Diagram(
                 workload = Pod("Dev Service\n(SSH/Jupyter/Coder/Files)")
 
     # CLI client
-    cli = Client("kuberde-cli\n(Go)")
+    cli = Client("kuberde-cli\n(Go)\n~/.kuberde/")
 
-    # User interactions
+    # ── Web user path ──────────────────────────────────────────────────────────
     web_user >> Edge(label="HTTPS") >> ingress
     ingress >> Edge(label="Frontend") >> web_ui
     web_ui >> Edge(label="REST API\n(JWT Auth)") >> server
 
-    cli_user >> Edge(label="login\n(OIDC)") >> cli
-    cli >> Edge(label="connect\n(WebSocket + JWT)") >> ingress
-    ingress >> Edge(label="WebSocket") >> server
+    # ── CLI/SSH primary path: DERP relay (WireGuard encrypted) ────────────────
+    cli_user >> Edge(label="ssh kuberde-*\n(ProxyCommand)") >> cli
+    cli >> Edge(
+        label="1. DERP relay\n(WireGuard E2E)",
+        color="green",
+        style="bold"
+    ) >> ingress
+    ingress >> Edge(
+        label="/derp-pod/{podIP}\n→ same pod as agent",
+        color="green",
+        style="bold"
+    ) >> server
 
-    # Authentication flow
+    # ── CLI/SSH fallback path: WebSocket relay ─────────────────────────────────
+    cli >> Edge(
+        label="2. WebSocket fallback\n(/connect/{agentID})",
+        color="orange",
+        style="dashed"
+    ) >> ingress
+
+    # ── Authentication ─────────────────────────────────────────────────────────
     web_ui >> Edge(label="OIDC Auth\n(/auth/*)") >> server
     server >> Edge(label="JWKS Validation\nUser Provisioning") >> keycloak
-    cli >> Edge(label="OAuth2 Flow") >> keycloak
+    cli >> Edge(label="OAuth2 Flow\n(login command)") >> keycloak
 
-    # Server interactions
-    server >> Edge(label="CRUD Operations\n(GORM)") >> database
+    # ── Server ↔ Database ──────────────────────────────────────────────────────
+    server >> Edge(
+        label="CRUD + agent_pod_sessions\n(heartbeat every 2 min)"
+    ) >> database
+
+    # ── Server ↔ Kubernetes ───────────────────────────────────────────────────
     server >> Edge(label="Create RDEAgent CR\nCreate PVC") >> k8s_api
-    server >> Edge(label="Yamux Streams\n(Multiplexed)") >> agent_pod
 
-    # Operator control loop
+    # ── Server ↔ Agent ────────────────────────────────────────────────────────
+    server >> Edge(label="Yamux Streams\n(browser path)") >> agent_pod
+
+    # ── Operator control loop ─────────────────────────────────────────────────
     operator >> Edge(label="Watch") >> k8s_api
     k8s_api >> Edge(label="Events") >> operator
     operator_pod >> Edge(label="Reconcile\nRDEAgent CRs") >> k8s_api
-    operator_pod >> Edge(label="Poll Agent Stats\n(/mgmt/agents/{id})") >> server
+    operator_pod >> Edge(
+        label="Poll /mgmt/agents/{id}\n(forwarded to correct pod)"
+    ) >> server
     operator >> Edge(label="Create/Update\nDeployments") >> agent_deployment
     operator >> Edge(label="Create/Bind\nPVCs") >> agent_pvc
 
-    # CRD to deployment
+    # ── CRD → Deployment ──────────────────────────────────────────────────────
     rde_agent_crd >> Edge(label="Defines") >> agent_deployment
 
-    # Agent to workload
+    # ── Agent → Server and Workload ───────────────────────────────────────────
     agent_deployment >> agent_pod
-    agent_pod >> Edge(label="WebSocket + Yamux\n(Client Credentials)") >> server
+    agent_pod >> Edge(
+        label="WebSocket + Yamux\n(Client Credentials)\n→ upserts agent_pod_sessions"
+    ) >> server
+    agent_pod >> Edge(label="Register WireGuard key\n(/api/agent-coordination/)") >> server
     agent_pod >> Edge(label="TCP Bridge\n(io.Copy)") >> workload
     agent_pvc >> Edge(label="Mount") >> workload
     agent_pv >> Edge(label="Bind") >> agent_pvc
 
-    # User to agent traffic flow
-    ingress >> Edge(label="HTTP Proxy\n(agent-id.domain)", style="dashed", color="blue") >> server
+    # ── Subdomain HTTP proxy ───────────────────────────────────────────────────
+    ingress >> Edge(
+        label="HTTP Proxy\n(agent-id.domain)\n→ inter-pod forward if needed",
+        style="dashed",
+        color="blue"
+    ) >> server
 
 
-# Generate component interaction diagram
+# ─── Diagram 2: Connection Data Flow ──────────────────────────────────────────
 with Diagram(
     "KubeRDE Data Flow",
     filename="docs/kuberde_data_flow",
@@ -151,43 +186,52 @@ with Diagram(
 ):
 
     user = User("User")
+    cli_client = Client("kuberde-cli")
 
-    with Cluster("Authentication Flow"):
-        auth_start = Client("1. Login Request")
-        auth_keycloak = Ansible("2. Keycloak\n(OIDC)")
-        auth_token = Go("3. JWT Token")
+    with Cluster("Authentication"):
+        auth_keycloak = Ansible("Keycloak\n(OIDC)")
+        auth_token = Go("JWT Token\n(~/.kuberde/token.json)")
 
-    with Cluster("Connection Flow"):
-        conn_server = Server("4. Server\n(Validate JWT)")
-        conn_yamux = Go("5. Yamux Session\n(Multiplexed)")
-        conn_agent = Pod("6. Agent Pod")
-        conn_service = Pod("7. Dev Service\n(SSH/Web)")
+    with Cluster("Path A — DERP Relay (CLI/SSH, Primary)"):
+        derp_coord = Go("1. GET /api/agent-coordination\n(fetch agent WireGuard pubkey)")
+        derp_register = Go("2. POST .../peer\n(register CLI pubkey → server → agent)")
+        derp_server = Server("3. DERP Server\n(/derp-pod/{podIP})\nWireGuard E2E encrypted")
+        derp_agent = Pod("4. Agent Pod\n(WireGuard peer)")
+        derp_service = Pod("5. SSH / Dev Service")
 
-    with Cluster("Data Flow"):
-        data_user = User("User Request")
-        data_server = Server("Server\n(HTTP/WS)")
-        data_yamux = Go("Yamux Stream")
-        data_agent = Pod("Agent")
-        data_service = Pod("Service")
+    with Cluster("Path B — WebSocket Relay (Browser / Fallback)"):
+        ws_server = Server("Server\n(/connect/{agentID})")
+        ws_yamux = Go("Yamux Stream\n(multiplexed)")
+        ws_agent = Pod("Agent Pod\n(yamux.Accept)")
+        ws_service = Pod("Dev Service")
 
-    # Authentication flow
-    user >> auth_start >> auth_keycloak >> auth_token
+    # Authentication
+    user >> cli_client
+    cli_client >> Edge(label="login") >> auth_keycloak >> auth_token
 
-    # Connection establishment
-    auth_token >> conn_server >> conn_yamux >> conn_agent >> conn_service
+    # DERP path (primary for CLI/SSH)
+    auth_token >> derp_coord
+    derp_coord >> derp_register
+    derp_register >> derp_server
+    derp_server >> Edge(
+        label="WireGuard\nencrypted relay",
+        color="green",
+        style="bold"
+    ) >> derp_agent >> derp_service
 
-    # Bidirectional data flow
-    data_user >> Edge(label="Request") >> data_server
-    data_server >> Edge(label="Stream") >> data_yamux
-    data_yamux >> Edge(label="TCP") >> data_agent
-    data_agent >> Edge(label="Local") >> data_service
-    data_service >> Edge(label="Response", style="dashed") >> data_agent
-    data_agent >> Edge(label="TCP", style="dashed") >> data_yamux
-    data_yamux >> Edge(label="Stream", style="dashed") >> data_server
-    data_server >> Edge(label="Response", style="dashed") >> data_user
+    # WebSocket path (browser or fallback)
+    auth_token >> ws_server
+    ws_server >> ws_yamux >> ws_agent >> ws_service
+
+    # Response paths
+    derp_service >> Edge(style="dashed", color="green") >> derp_agent
+    derp_agent >> Edge(style="dashed", color="green") >> derp_server
+    ws_service >> Edge(style="dashed") >> ws_agent
+    ws_agent >> Edge(style="dashed") >> ws_yamux
+    ws_yamux >> Edge(style="dashed") >> ws_server
 
 
-# Generate operator lifecycle diagram
+# ─── Diagram 3: Operator Lifecycle ────────────────────────────────────────────
 with Diagram(
     "KubeRDE Operator Lifecycle",
     filename="docs/kuberde_operator_lifecycle",
@@ -215,16 +259,17 @@ with Diagram(
             operator_reconcile = Go("Reconcile Loop")
             operator_create_deploy = Go("Create Deployment")
             operator_create_pvc = Go("Create PVC")
-            operator_poll = Go("Poll Agent Stats\n(TTL Check)")
+            operator_poll = Go("Poll Agent Stats\n(/mgmt/agents/{id})\nforwarded to correct pod")
 
         with Cluster("Resources"):
             deployment = Deployment("Agent Deployment")
             pvc = PVC("Workspace PVC")
             pod_running = Pod("Agent Pod\n(Running)")
 
-    with Cluster("Agent Connection"):
-        agent_connect = Go("Agent Connects\n(WebSocket)")
-        server_session = Server("Server\n(Yamux Session)")
+    with Cluster("Agent Connection & HA Registration"):
+        agent_connect = Go("Agent Connects\n(WebSocket + JWT)")
+        server_session = Server("Server Pod\n(Yamux Session)")
+        pg_session = PostgreSQL("agent_pod_sessions\n(pod_ip, heartbeat)")
         agent_ready = Pod("Agent Ready\n(Serving)")
 
     # User creates service
@@ -240,13 +285,17 @@ with Diagram(
     deployment >> pod_running
     pvc >> Edge(label="Mount") >> pod_running
 
-    # Agent connects
+    # Agent connects and registers in PostgreSQL
     pod_running >> agent_connect >> server_session
+    server_session >> Edge(label="Upsert pod_ip\n(2-min heartbeat)") >> pg_session
     server_session >> Edge(label="Session Established") >> agent_ready
 
-    # Operator polls for TTL
+    # Operator polls — forwarded to correct pod via pg_session lookup
     operator_reconcile >> operator_poll >> server_session
-    server_session >> Edge(label="Last Activity Time\n(Scale Down Logic)", style="dashed") >> operator_reconcile
+    server_session >> Edge(
+        label="Last Activity Time\n(Scale Down Logic)",
+        style="dashed"
+    ) >> operator_reconcile
 
 
 print("✅ Architecture diagrams generated successfully!")

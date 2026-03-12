@@ -1,7 +1,7 @@
 # KubeRDE System Architecture
 
-**Version**: 1.0
-**Last Updated**: 2025-12-08
+**Version**: 2.0
+**Last Updated**: 2026-03-12
 **Status**: Production
 
 ---
@@ -21,39 +21,73 @@
 
 KubeRDE is a **Fast Reverse Proxy** system designed to securely expose services behind NAT/firewalls to the public internet. The system combines Kubernetes-native management with enterprise-grade authentication and multi-tenant isolation.
 
-### High-Level Architecture
+### 1.1 High-Level Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Public Internet                          │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │
-                            ▼
-                    ┌───────────────┐
-                    │   Ingress     │
-                    │  Controller   │
-                    └───────┬───────┘
-                            │
-        ┌───────────────────┼───────────────────┐
-        │                   │                   │
-        ▼                   ▼                   ▼
-    ┌────────┐        ┌──────────┐       ┌──────────┐
-    │Keycloak│◄───────│  KubeRDE │       │   User   │
-    │ (OIDC) │        │  Server  │◄──────│  Client  │
-    └────────┘        └─────┬────┘       └──────────┘
-                            │
-                            │ WebSocket + Yamux
-                            │
-                    ┌───────▼───────┐
-                    │ KubeRDE Agent │
-                    │   (Sidecar)   │
-                    └───────┬───────┘
-                            │
-                            ▼
-                    ┌───────────────┐
-                    │   Workload    │
-                    │  (SSH/HTTP)   │
-                    └───────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                              Public Internet                                 │
+└────────────────────────┬─────────────────────────────┬───────────────────────┘
+                         │                             │
+                         ▼                             ▼
+                 ┌───────────────┐             ┌───────────────┐
+                 │   Browser /   │             │  SSH Client   │
+                 │   Web User    │             │  (kuberde-cli)│
+                 └───────┬───────┘             └───────┬───────┘
+                         │ HTTPS/WebSocket             │ DERP relay or
+                         │ + Yamux                     │ WebSocket fallback
+                         ▼                             │
+                 ┌───────────────┐                     │
+                 │    Ingress    │                     │
+                 │  Controller   │                     │
+                 └───────┬───────┘                     │
+                         │                             │
+        ┌────────────────┼──────────────┐              │
+        ▼                ▼              ▼              │
+  ┌──────────┐    ┌──────────┐   ┌──────────┐         │
+  │ Server   │    │ Server   │   │ Server   │◄────────┘
+  │  Pod 1   │    │  Pod 2   │   │  Pod 3   │  (any pod handles control plane)
+  │ (DERP)   │    │ (DERP)   │   │ (DERP)   │
+  └────┬─────┘    └────┬─────┘   └────┬─────┘
+       │               │              │
+       └───────────────┼──────────────┘
+                       │ Shared state: agent_pod_sessions
+                       ▼
+               ┌───────────────┐
+               │  PostgreSQL   │
+               │  (agent→pod   │
+               │   mappings)   │
+               └───────────────┘
+
+  Inter-pod forwarding (httputil.ReverseProxy):
+  ┌──────────┐  X-Internal-Forward   ┌──────────┐
+  │ Server   │──────────────────────►│ Server   │
+  │  Pod N   │                       │  Pod M   │
+  └──────────┘                       └────┬─────┘
+                                          │ WebSocket + Yamux
+                                          ▼
+                                  ┌───────────────┐
+                                  │ KubeRDE Agent │
+                                  │  (connected   │
+                                  │   to Pod M)   │
+                                  └───────┬───────┘
+                                          │
+                                          ▼
+                                  ┌───────────────┐
+                                  │   Workload    │
+                                  │  (SSH/HTTP)   │
+                                  └───────────────┘
+
+  CLI / SSH path (DERP relay):
+  ┌──────────┐   /api/agent-coordination   ┌──────────┐
+  │ kuberde- │────────────────────────────►│ Server   │
+  │   cli    │◄── DERP URL (pod-specific) ─│  (any)   │
+  └────┬─────┘                             └──────────┘
+       │ WebSocket to /derp-pod/{podIP}
+       ▼
+  ┌──────────┐   DERP relay (same pod)   ┌──────────┐
+  │ Server   │◄──────────────────────────│ Agent    │
+  │  Pod M   │   WireGuard over DERP     │          │
+  └──────────┘                           └──────────┘
 ```
 
 ### Component Responsibilities
@@ -74,6 +108,8 @@ KubeRDE is a **Fast Reverse Proxy** system designed to securely expose services 
 
 **Location**: `cmd/server/main.go`
 
+**Deployment**: 3 replicas (`deploy/k8s/03-server.yaml`)
+
 **Responsibilities**:
 - Accept WebSocket connections from agents and users
 - Validate OIDC tokens (JWT) via JWKS
@@ -81,13 +117,24 @@ KubeRDE is a **Fast Reverse Proxy** system designed to securely expose services 
 - Provide HTTP reverse proxy for web workloads
 - Track agent activity for TTL management
 - Implement multi-tenant authorization
+- Embed an independent DERP relay server per pod (`tailscale.com/derp`)
+- Persist agent→pod mappings in PostgreSQL (`agent_pod_sessions` table)
+- Forward requests to the correct pod via `httputil.ReverseProxy` with `X-Internal-Forward` header to prevent forwarding loops
+- Maintain a 2-minute heartbeat for each connected agent's pod IP
+- Report accurate agent status to the operator by forwarding `/mgmt/agents/{id}` to the owning pod
 
 **Key APIs**:
 - `GET /ws` - WebSocket upgrade endpoint (agents)
 - `POST /auth/login` - OIDC authentication initiation
 - `GET /auth/callback` - OIDC callback handler
-- `GET /mgmt/agents/{id}` - Agent statistics API
+- `GET /mgmt/agents/{id}` - Agent statistics API (forwarded to owning pod)
 - `POST /api/agents/{id}/scale-up` - Auto-scale trigger
+- `GET /derp` - DERP relay endpoint (per-pod, embedded Tailscale DERP server)
+- `GET /derp-pod/{podIP}` - Proxies WebSocket DERP connections to the target pod's local `/derp` (ensures CLI and Agent share the same DERP instance)
+- `GET /api/derp-map` - Returns DERP region map for client discovery
+- `GET /api/agent-coordination/{agentID}` - Returns agent's WireGuard public key, endpoints, and DERP URL
+- `POST /api/agent-coordination/{agentID}/peer` - CLI registers its WireGuard public key; returns 503 if agent is offline so CLI can fall back to WebSocket
+- `POST /internal/send-control/{agentID}` - Internal cross-pod endpoint for WireGuard peer notification
 
 **Authentication Flow**:
 ```
@@ -128,29 +175,43 @@ User → Server:2022 → Server:Yamux → Agent:Yamux → Agent:LocalTarget
 
 **Location**: `cmd/cli/`
 
+**Token path**: `~/.kuberde/token.json`
+**WireGuard key**: `~/.kuberde/wg-key` (persisted private key)
+**Server URL**: `~/.kuberde/server` (saved by `config-ssh`)
+
 **Commands**:
 
 1. **login** - OIDC browser-based authentication
    ```bash
-   kuberde-cli login --server-url http://frp.byai.uk
+   kuberde-cli login --server-url https://frp.byai.uk
    ```
    - Opens browser to Keycloak
-   - Saves token to `~/.frp/token.json`
+   - Saves token to `~/.kuberde/token.json`
 
-2. **connect** - Establish tunneled connection
+2. **connect** - Establish tunneled connection (used as SSH ProxyCommand)
    ```bash
-   kuberde-cli connect --agent-id user-alice-dev
+   kuberde-cli connect <agentID>
    ```
-   - Reads saved token
-   - Creates WebSocket tunnel
-   - Acts as SSH ProxyCommand
+   - Reads saved token and server URL from `~/.kuberde/`
+   - Tries DERP relay path first (`connectViaDERP`): registers WireGuard public key via `POST /api/agent-coordination/{agentID}/peer`, then connects to the agent-specific DERP instance at `/derp-pod/{podIP}`
+   - Falls back to WebSocket relay (`connectViaWebSocket`) if DERP is unavailable or server returns 503 (agent offline)
+   - Acts as SSH ProxyCommand, bridging stdio to the tunnel
+
+3. **config-ssh** - Configure SSH client integration
+   ```bash
+   kuberde-cli config-ssh --server <wss://frp.byai.uk> --write
+   ```
+   - Saves the server URL to `~/.kuberde/server`
+   - With `--write`: appends an SSH config block to `~/.ssh/config`
 
 **SSH Integration**:
 ```ssh
-# ~/.ssh/config
-Host *.frp
-    ProxyCommand kuberde-cli connect --agent-id %h
+# ~/.ssh/config (written by config-ssh --write)
+Host kuberde-*
+    ProxyCommand kuberde-cli connect %n
 ```
+
+The `%n` substitution passes the target hostname (agent ID) to `kuberde-cli connect`.
 
 ### 2.4 KubeRDE Operator
 
@@ -287,7 +348,7 @@ This section documents critical design choices, their rationale, and trade-offs.
 
 | Client Type | Flow | Token Storage |
 |-------------|------|---------------|
-| CLI Users | Authorization Code | `~/.frp/token.json` |
+| CLI Users | Authorization Code | `~/.kuberde/token.json` |
 | Web Users | Authorization Code | Cookie (`frp_session`) |
 | Agents | Client Credentials | Memory (auto-refresh) |
 
@@ -433,6 +494,50 @@ This section documents critical design choices, their rationale, and trade-offs.
 
 **Status**: 🔄 Planned
 
+### ADR-012: HA via PostgreSQL Session Tracking
+
+**Decision**: Store agent→pod mappings in the existing PostgreSQL database instead of using Redis or Kubernetes sticky sessions.
+
+**Rationale**:
+- PostgreSQL is already a required dependency; no additional Redis infrastructure needed
+- A 2-minute heartbeat with a 5-minute stale TTL is sufficient for the agent connection lifecycle
+- `httputil.ReverseProxy` with `X-Internal-Forward` header provides loop-free inter-pod forwarding without a separate service mesh
+
+**Implementation**:
+- New table `agent_pod_sessions` (`agent_id`, `pod_ip`, `pod_port`, `updated_at`) created by migration `deploy/migrations/003_agent_pod_sessions.sql`
+- On agent WebSocket connect: server upserts its own pod IP into `agent_pod_sessions` and maintains a heartbeat every 2 minutes
+- On user connect: server reads the owning pod IP from PostgreSQL and reverse-proxies the connection if the agent is on a different pod
+- `isAgentOnline(agentID)`: checks local in-memory `agentStats` first; falls back to `agent_pod_sessions` (records older than 5 minutes are treated as offline)
+- `handleMgmtAgentStats`: forwards the request to the correct pod so the operator always receives accurate data
+
+**Trade-offs**:
+- Adds minor latency for cross-pod lookups (one PostgreSQL read per new connection)
+- Stale TTL window means an agent crash may appear online for up to 5 minutes
+
+**Status**: ✅ Implemented
+
+### ADR-013: Pod-Specific DERP Relay Routing
+
+**Decision**: Each server pod runs an independent embedded DERP relay; a `/derp-pod/{podIP}` proxy endpoint ensures both CLI and Agent always connect to the same DERP instance regardless of load-balancer routing.
+
+**Rationale**:
+- A DERP relay maintains per-connection state; both peers (CLI and Agent) must reach the same DERP instance for the relay to function
+- A shared load balancer cannot guarantee affinity without sticky sessions, which adds operational complexity
+- Proxying via `/derp-pod/{podIP}` on any pod is stateless and requires no session affinity at the ingress layer
+
+**Implementation**:
+- Each pod embeds `tailscale.com/derp` and serves it at `/derp`
+- `derpURLForAgent(agentID)` returns `publicURL + "/derp-pod/" + podIP` using the pod IP stored in `agent_pod_sessions`
+- `GET /derp-pod/{podIP}`: any pod accepts the WebSocket connection and proxies it to `http://{podIP}:8080/derp` on the target pod
+- `GET /api/agent-coordination/{agentID}`: returns the agent's WireGuard public key, endpoints, and the pod-specific DERP URL
+- `POST /api/agent-coordination/{agentID}/peer`: CLI registers its WireGuard public key; server notifies the agent via `POST /internal/send-control/{agentID}` on the owning pod
+
+**Trade-offs**:
+- DERP instances are not shared across pods; an agent that reconnects to a different pod will have a different DERP URL, requiring the CLI to re-fetch coordination data
+- Direct pod-to-pod traffic for `/derp-pod/` proxying requires pod IPs to be routable within the cluster (standard Kubernetes networking)
+
+**Status**: ✅ Implemented
+
 ---
 
 ## 4. Current Features
@@ -516,9 +621,16 @@ This section documents critical design choices, their rationale, and trade-offs.
 - **Volume Support**: PVC mounting for persistent workloads (planned)
 
 #### High Availability
-- **Agent Auto-Recovery**: Kubernetes restarts failed pods
+
+The KubeRDE Server runs as 3 replicas. Shared state is maintained in PostgreSQL so all pods are stateless with respect to the data plane.
+
+- **Agent Auto-Recovery**: Kubernetes restarts failed agent pods
 - **Connection Resilience**: Yamux reconnects broken streams
 - **Graceful Shutdown**: Agents drain connections before terminating
+- **Multi-Pod Server**: 3 server replicas behind a single Kubernetes Service; any pod can handle any incoming request
+- **PostgreSQL Session Tracking**: `agent_pod_sessions` table records which pod each agent is connected to; user requests are forwarded to the correct pod via `httputil.ReverseProxy`
+- **Heartbeat**: Each connected agent's pod IP is refreshed every 2 minutes; records older than 5 minutes are treated as stale
+- **DERP Pod Affinity**: The `/derp-pod/{podIP}` endpoint routes CLI and Agent to the same DERP instance regardless of which server pod the client reaches (see ADR-013)
 
 ---
 
@@ -623,14 +735,27 @@ This section documents critical design choices, their rationale, and trade-offs.
 5. Agent enters accept loop for new streams
 ```
 
-**User Connection (SSH)**:
+**User Connection (SSH via DERP relay — primary path)**:
 ```
-1. User runs: ssh -o ProxyCommand="kuberde-cli connect --agent-id X" user@host
-2. CLI reads token from ~/.frp/token.json
+1. User runs: ssh kuberde-user-alice-dev (SSH config: ProxyCommand kuberde-cli connect %n)
+2. CLI reads token from ~/.kuberde/token.json and server URL from ~/.kuberde/server
+3. CLI calls GET /api/agent-coordination/{agentID} → receives agent WireGuard public key and DERP URL (/derp-pod/{podIP})
+4. CLI calls POST /api/agent-coordination/{agentID}/peer → registers CLI WireGuard public key; server returns 503 if agent offline
+5. CLI opens WebSocket to /derp-pod/{podIP}; server proxies to the owning pod's local /derp
+6. Agent has already connected its WireGuard interface to the same DERP instance
+7. WireGuard tunnel established between CLI and Agent over DERP
+8. SSH traffic flows through WireGuard tunnel directly to Agent → LocalSSH
+```
+
+**User Connection (SSH via WebSocket relay — fallback)**:
+```
+1. DERP path unavailable or server returned 503 (agent offline)
+2. CLI reads token from ~/.kuberde/token.json
 3. CLI connects to ws://server:8080/ws with token
 4. Server validates token, checks user owns agent X
-5. Server opens Yamux stream to agent X
-6. Bidirectional copy: SSH ↔ WebSocket ↔ Yamux ↔ Agent ↔ LocalSSH
+5. Server looks up owning pod in agent_pod_sessions; reverse-proxies if needed
+6. Server opens Yamux stream to agent X
+7. Bidirectional copy: SSH ↔ WebSocket ↔ Yamux ↔ Agent ↔ LocalSSH
 ```
 
 **User Connection (HTTP)**:

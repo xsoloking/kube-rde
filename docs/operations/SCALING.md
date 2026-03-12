@@ -41,7 +41,7 @@ FRP scaling has multiple dimensions:
 - **Agents**: Up to 20 agents tested
 - **Concurrent users**: Up to 50 connections
 - **Throughput**: Up to 100 MB/s aggregate
-- **Server**: Single replica, 2 CPU / 4 GB RAM
+- **Server**: 3 replicas (HA, PostgreSQL-backed), 2 CPU / 4 GB RAM per replica
 
 **Theoretical Limits**:
 - **Agents**: 500+ per server (limited by Yamux sessions)
@@ -472,107 +472,38 @@ kubectl apply -f deploy/k8s/scaling/server-hpa.yaml
 kubectl get hpa -n kuberde -w
 ```
 
-### Load Balancing Strategy
+### Load Balancing
 
-**Problem**: WebSocket connections are sticky, standard load balancing doesn't work
+**Current Implementation**: Stateless at the load balancer layer — no sticky sessions needed.
 
-**Solution 1: Session Affinity** (Client IP):
-```yaml
-# In server Service
-spec:
-  sessionAffinity: ClientIP
-  sessionAffinityConfig:
-    clientIP:
-      timeoutSeconds: 10800  # 3 hours
+All server pods share agent session state via PostgreSQL. Any pod can:
+- Accept new agent connections (and record to PostgreSQL)
+- Handle user connections by looking up the correct pod from PostgreSQL and forwarding
+- Serve DERP relay connections by proxying to the correct pod's DERP instance
+
+Standard round-robin load balancing at the Ingress layer works correctly.
+
+### Shared State via PostgreSQL
+
+**Current Implementation**: Agent-to-pod mapping stored in PostgreSQL — no Redis required.
+
+The `agent_pod_sessions` table maps each connected agent to the server pod IP that holds its Yamux session:
+
+```sql
+CREATE TABLE agent_pod_sessions (
+    agent_id   TEXT      PRIMARY KEY,
+    pod_ip     TEXT      NOT NULL,
+    pod_port   INTEGER   NOT NULL DEFAULT 8080,
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
 ```
 
-**Solution 2: Consistent Hashing** (Ingress):
-```yaml
-# In Ingress
-annotations:
-  nginx.ingress.kubernetes.io/upstream-hash-by: "$remote_addr"
-```
+- **Heartbeat**: Each pod updates `updated_at` every 2 minutes for its connected agents
+- **Stale TTL**: Records older than 5 minutes are treated as disconnected
+- **Forwarding**: When a user request hits Pod A but the agent is on Pod B, Pod A proxies the request to Pod B via `httputil.ReverseProxy` with `X-Internal-Forward` header to prevent loops
+- **DERP routing**: Pod-specific DERP URL (`/derp-pod/{podIP}`) ensures CLI and Agent connect to the same DERP instance; any pod proxies WebSocket DERP connections to the target pod
 
-**Solution 3: Agent-Side Load Balancing** (Recommended for 50+):
-```go
-// Agent connects to one of multiple server endpoints
-servers := []string{
-    "ws://frp-server-0.kuberde.svc/ws",
-    "ws://frp-server-1.kuberde.svc/ws",
-    "ws://frp-server-2.kuberde.svc/ws",
-}
-
-// Pick server based on agent ID hash
-serverIndex := hashAgentID(agentID) % len(servers)
-serverURL := servers[serverIndex]
-```
-
-### Database for Shared State
-
-**Current**: In-memory session storage
-
-**Problem**: Multiple server replicas don't share state
-
-**Solution**: Redis for session storage
-
-**Redis Deployment**:
-```yaml
-# File: deploy/k8s/scaling/redis.yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: redis
-  namespace: kuberde
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: redis
-  template:
-    metadata:
-      labels:
-        app: redis
-    spec:
-      containers:
-      - name: redis
-        image: redis:7-alpine
-        ports:
-        - containerPort: 6379
-        resources:
-          requests:
-            cpu: "250m"
-            memory: "512Mi"
-          limits:
-            cpu: "500m"
-            memory: "1Gi"
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: redis
-  namespace: kuberde
-spec:
-  selector:
-    app: redis
-  ports:
-  - port: 6379
-```
-
-**Server Integration** (code changes needed):
-```go
-import "github.com/go-redis/redis/v8"
-
-// Initialize Redis client
-rdb := redis.NewClient(&redis.Options{
-    Addr: "redis.kuberde.svc:6379",
-})
-
-// Store session
-rdb.Set(ctx, sessionID, tokenJSON, 24*time.Hour)
-
-// Retrieve session
-val, err := rdb.Get(ctx, sessionID).Result()
-```
+**Status**: ✅ Implemented and deployed
 
 ### Operator Leader Election
 

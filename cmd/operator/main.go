@@ -1403,7 +1403,7 @@ func (c *Controller) reconcileStorage(cr *unstructured.Unstructured, agentID str
 					corev1.ReadWriteOnce,
 				},
 				StorageClassName: &storageClass,
-				Resources: corev1.ResourceRequirements{
+				Resources: corev1.VolumeResourceRequirements{
 					Requests: corev1.ResourceList{
 						corev1.ResourceStorage: resource.MustParse(size),
 					},

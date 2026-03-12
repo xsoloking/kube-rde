@@ -540,6 +540,57 @@ const ServiceDetail: React.FC = () => {
                         Download
                       </button>
                     </div>
+                    {/* Post-download instructions */}
+                    <div className="space-y-2">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">
+                        After Downloading
+                      </p>
+                      <p className="text-[10px] text-text-secondary/70 leading-relaxed">
+                        Rename the binary to{' '}
+                        <code className="text-xs bg-background-dark px-1.5 py-0.5 rounded font-mono text-text-foreground/80">
+                          kuberde-cli
+                        </code>{' '}
+                        and install it to a directory in your{' '}
+                        <code className="text-xs bg-background-dark px-1.5 py-0.5 rounded font-mono text-text-foreground/80">
+                          $PATH
+                        </code>
+                        :
+                      </p>
+                      <div className="bg-background-dark/50 border border-border-dark p-3 rounded-lg relative group">
+                        <code className="text-xs text-emerald-400 font-mono block leading-relaxed pr-8">
+                          chmod +x kuberde-cli-latest &amp;&amp; sudo mv kuberde-cli-latest /usr/local/bin/kuberde-cli
+                        </code>
+                        <button
+                          onClick={() =>
+                            copyToClipboard(
+                              'chmod +x kuberde-cli-latest && sudo mv kuberde-cli-latest /usr/local/bin/kuberde-cli',
+                              setCopiedLogin,
+                            )
+                          }
+                          className="absolute top-3 right-3 text-text-secondary hover:text-text-foreground transition-colors"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">
+                            {copiedLogin ? 'check' : 'content_copy'}
+                          </span>
+                        </button>
+                      </div>
+                      <div className="flex items-start gap-2 bg-amber-500/5 rounded-lg p-3 border border-amber-500/10">
+                        <span className="material-symbols-outlined text-amber-400 text-[16px] mt-0.5 flex-shrink-0">
+                          info
+                        </span>
+                        <p className="text-[10px] text-amber-400/80 leading-relaxed">
+                          If you prefer not to install to{' '}
+                          <code className="text-xs bg-amber-500/10 px-1 py-0.5 rounded font-mono text-amber-300">
+                            /usr/local/bin
+                          </code>
+                          , you can keep the binary anywhere and replace{' '}
+                          <code className="text-xs bg-amber-500/10 px-1 py-0.5 rounded font-mono text-amber-300">
+                            kuberde-cli
+                          </code>{' '}
+                          with its full path in all commands below.
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -566,38 +617,13 @@ const ServiceDetail: React.FC = () => {
                     </p>
                     <div className="bg-background-dark/50 border border-border-dark p-4 rounded-lg group relative">
                       <code className="text-xs text-emerald-400 font-mono block leading-relaxed pr-8">
-                        ./kuberde-cli login --issuer {systemConfig.keycloak_url}/realms/
+                        kuberde-cli login --issuer {systemConfig.keycloak_url}/realms/
                         {systemConfig.realm_name}
                       </code>
                       <button
                         onClick={() =>
                           copyToClipboard(
-                            `./kuberde-cli login --issuer ${systemConfig.keycloak_url}/realms/${systemConfig.realm_name}`,
-                            setCopiedLogin,
-                          )
-                        }
-                        className="absolute top-4 right-4 text-text-secondary hover:text-text-foreground transition-colors"
-                      >
-                        <span className="material-symbols-outlined text-[18px]">
-                          {copiedLogin ? 'check' : 'content_copy'}
-                        </span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* SSH Connect Command */}
-                  <div className="space-y-3">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">
-                      2. Connect to Agent via SSH ProxyCommand
-                    </p>
-                    <div className="bg-background-dark/50 border border-border-dark p-4 rounded-lg group relative">
-                      <code className="text-xs text-emerald-400 font-mono block leading-relaxed pr-8">
-                        {`ssh -o ProxyCommand="./kuberde-cli connect ${getWebSocketURL()}/connect/${service.agent_id}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@placeholder`}
-                      </code>
-                      <button
-                        onClick={() =>
-                          copyToClipboard(
-                            `ssh -o ProxyCommand="./kuberde-cli connect ${getWebSocketURL()}/connect/${service.agent_id}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@placeholder`,
+                            `kuberde-cli login --issuer ${systemConfig.keycloak_url}/realms/${systemConfig.realm_name}`,
                             setCopiedSSH,
                           )
                         }
@@ -610,36 +636,19 @@ const ServiceDetail: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* SSH Config - Optional */}
-                  <div className="space-y-3 pt-4 border-t border-border-dark/50">
-                    <div className="flex items-center gap-2">
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">
-                        3. Add to SSH Config (Optional)
-                      </p>
-                      <span className="px-2 py-0.5 bg-blue-500/10 text-blue-400 text-[9px] font-bold uppercase tracking-widest rounded border border-blue-500/20">
-                        Recommended
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-text-secondary/70 leading-relaxed">
-                      Add this configuration to your{' '}
-                      <code className="text-xs bg-background-dark px-1.5 py-0.5 rounded font-mono text-text-foreground/80">
-                        ~/.ssh/config
-                      </code>{' '}
-                      file for easier access
+                  {/* SSH Connect Command */}
+                  <div className="space-y-3">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">
+                      2. Connect to Agent via SSH
                     </p>
                     <div className="bg-background-dark/50 border border-border-dark p-4 rounded-lg group relative">
-                      <code className="text-xs text-blue-400 font-mono block leading-relaxed pr-8 whitespace-pre">
-                        {`Host ${service.agent_id.split('-ssh')[0]}
-    HostName placeholder
-    User root
-    ProxyCommand ~/Downloads/kuberde-cli connect ${getWebSocketURL()}/connect/${service.agent_id}
-    StrictHostKeyChecking no
-    UserKnownHostsFile /dev/null`}
+                      <code className="text-xs text-emerald-400 font-mono block leading-relaxed pr-8">
+                        {`ssh -o ProxyCommand="kuberde-cli connect ${service.agent_id}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@placeholder`}
                       </code>
                       <button
                         onClick={() =>
                           copyToClipboard(
-                            `Host ${service.agent_id.split('-ssh')[0]}\n    HostName placeholder\n    User root\n    ProxyCommand ~/Downloads/kuberde-cli connect ${getWebSocketURL()}/connect/${service.agent_id}\n    StrictHostKeyChecking no\n    UserKnownHostsFile /dev/null`,
+                            `ssh -o ProxyCommand="kuberde-cli connect ${service.agent_id}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@placeholder`,
                             setCopiedSSHConfig,
                           )
                         }
@@ -650,14 +659,68 @@ const ServiceDetail: React.FC = () => {
                         </span>
                       </button>
                     </div>
+                    <p className="text-[10px] text-text-secondary/60 leading-relaxed">
+                      This requires the server URL to be saved first (done automatically in Step 3 below).
+                    </p>
+                  </div>
+
+                  {/* SSH Config - Optional */}
+                  <div className="space-y-3 pt-4 border-t border-border-dark/50">
+                    <div className="flex items-center gap-2">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">
+                        3. Set Up SSH Config (Recommended)
+                      </p>
+                      <span className="px-2 py-0.5 bg-blue-500/10 text-blue-400 text-[9px] font-bold uppercase tracking-widest rounded border border-blue-500/20">
+                        One-time Setup
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-text-secondary/70 leading-relaxed">
+                      Run this command to save the server URL and auto-update{' '}
+                      <code className="text-xs bg-background-dark px-1.5 py-0.5 rounded font-mono text-text-foreground/80">
+                        ~/.ssh/config
+                      </code>
+                      :
+                    </p>
+                    <div className="bg-background-dark/50 border border-border-dark p-4 rounded-lg group relative">
+                      <code className="text-xs text-blue-400 font-mono block leading-relaxed pr-8">
+                        kuberde-cli config-ssh --server {getWebSocketURL()} --write
+                      </code>
+                      <button
+                        onClick={() =>
+                          copyToClipboard(
+                            `kuberde-cli config-ssh --server ${getWebSocketURL()} --write`,
+                            setCopiedLogin,
+                          )
+                        }
+                        className="absolute top-4 right-4 text-text-secondary hover:text-text-foreground transition-colors"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">
+                          {copiedLogin ? 'check' : 'content_copy'}
+                        </span>
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-text-secondary/70 leading-relaxed">
+                      This adds the following block to your SSH config, matching all KubeRDE agents:
+                    </p>
+                    <div className="bg-background-dark/50 border border-border-dark p-4 rounded-lg">
+                      <code className="text-xs text-blue-400/70 font-mono block leading-relaxed whitespace-pre">
+                        {`Host kuberde-*
+    ProxyCommand kuberde-cli connect %n
+    User root
+    StrictHostKeyChecking no
+    UserKnownHostsFile /dev/null
+    ServerAliveInterval 30
+    ServerAliveCountMax 3`}
+                      </code>
+                    </div>
                     <div className="flex items-start gap-2 bg-blue-500/5 rounded-lg p-3 border border-blue-500/10">
                       <span className="material-symbols-outlined text-blue-400 text-[16px] mt-0.5 flex-shrink-0">
                         info
                       </span>
                       <p className="text-[10px] text-blue-400/80 leading-relaxed">
-                        After adding this config, you can simply run:{' '}
+                        After setup, connect to this agent with:{' '}
                         <code className="text-xs bg-blue-500/10 px-1.5 py-0.5 rounded font-mono text-blue-300">
-                          ssh {service.agent_id.split('-ssh')[0]}
+                          ssh {service.agent_id}
                         </code>
                       </p>
                     </div>

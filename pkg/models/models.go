@@ -261,3 +261,32 @@ func (ResourceConfig) TableName() string {
 func (UserQuota) TableName() string {
 	return "user_quotas"
 }
+
+// AgentWireguardPeer stores Agent WireGuard public keys and endpoint info.
+// All Server replicas read from this table, enabling stateless HA coordination.
+type AgentWireguardPeer struct {
+	AgentID   string    `gorm:"primaryKey" json:"agent_id"`
+	PublicKey string    `gorm:"not null" json:"public_key"` // WireGuard NodePublic, hex-encoded
+	Endpoints string    `json:"endpoints"`                  // JSON array: ["1.2.3.4:12345", ...]
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// TableName specifies the table name for AgentWireguardPeer
+func (AgentWireguardPeer) TableName() string {
+	return "agent_wireguard_peers"
+}
+
+// AgentPodSession tracks which server pod holds each agent's active Yamux WebSocket session.
+// Stored in PostgreSQL so all server replicas can locate and forward to the correct pod,
+// enabling stateless HA for the server (replicas > 1 without sticky sessions).
+type AgentPodSession struct {
+	AgentID   string    `gorm:"primaryKey" json:"agent_id"`
+	PodIP     string    `gorm:"not null" json:"pod_ip"`   // Kubernetes pod IP of the server pod holding the session
+	PodPort   int       `gorm:"not null" json:"pod_port"` // internal HTTP port (typically 8080)
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// TableName specifies the table name for AgentPodSession
+func (AgentPodSession) TableName() string {
+	return "agent_pod_sessions"
+}

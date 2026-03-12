@@ -62,7 +62,7 @@ metadata:
   name: kuberde-server
   namespace: ${NAMESPACE}
 spec:
-  replicas: 1
+  replicas: 3  # HA: agent sessions stored in PostgreSQL; inter-pod forwarding via pod IP
   selector:
     matchLabels:
       app: kuberde-server
@@ -139,6 +139,11 @@ spec:
             secretKeyRef:
               name: postgresql-secret
               key: password
+        # Pod IP injected by Kubernetes downward API for HA inter-pod session forwarding
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
 ---
 apiVersion: v1
 kind: Service

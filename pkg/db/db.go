@@ -78,6 +78,8 @@ func AutoMigrate() error {
 		&models.AgentTemplate{},
 		&models.Team{},
 		&models.TeamQuota{},
+		&models.AgentWireguardPeer{},
+		&models.AgentPodSession{},
 	)
 }
 

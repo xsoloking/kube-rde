@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -41,6 +42,10 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"tailscale.com/derp"
+	"tailscale.com/derp/derphttp"
+	"tailscale.com/types/key"
+	tslogger "tailscale.com/types/logger"
 )
 
 var (
@@ -88,6 +93,21 @@ var (
 	keycloakClient *gocloak.GoCloak
 	adminToken     *gocloak.JWT
 	adminTokenMu   sync.RWMutex
+
+	// DERP relay (embedded, stateless – safe for multi-replica HA)
+	derpSrv         *derp.Server
+	derpHTTPHandler http.Handler
+	serverNodeKey   key.NodePrivate
+
+	// WireGuard coordination repository
+	wireguardRepo repositories.WireguardRepository
+
+	// Agent pod session repository (for HA multi-replica forwarding)
+	agentPodSessionRepo repositories.AgentPodSessionRepository
+
+	// This pod's IP address (injected by Kubernetes downward API via POD_IP env var).
+	// Used to register agent sessions and to distinguish local vs remote pods.
+	podIP = "127.0.0.1"
 )
 
 type contextKey string
@@ -123,6 +143,11 @@ func init() {
 	// Read agent auth secret from environment
 	if authSecret := os.Getenv("KUBERDE_AGENT_AUTH_SECRET"); authSecret != "" {
 		agentAuthSecret = authSecret
+	}
+
+	// Read this pod's IP (injected by Kubernetes downward API) for HA session forwarding
+	if ip := os.Getenv("POD_IP"); ip != "" {
+		podIP = ip
 	}
 
 	// Read namespace from environment, or auto-detect from service account
@@ -927,8 +952,14 @@ func handleSubdomainProxy(w http.ResponseWriter, r *http.Request) {
 		}
 		returnURL := fmt.Sprintf("%s://%s%s", scheme, r.Host, r.URL.Path)
 
-		// Redirect to login on main domain with return_url
-		loginURL := fmt.Sprintf("%s/auth/login?return_url=%s", frpURL, returnURL)
+		// Redirect to login on main domain with return_url.
+		// When the request came in over HTTPS, ensure the login URL also uses HTTPS
+		// to avoid Traefik's HTTP→HTTPS redirect which uses the internal container port.
+		loginBase := frpURL
+		if scheme == "https" && strings.HasPrefix(loginBase, "http://") {
+			loginBase = "https://" + strings.TrimPrefix(loginBase, "http://")
+		}
+		loginURL := fmt.Sprintf("%s/auth/login?return_url=%s", loginBase, returnURL)
 
 		http.Redirect(w, r, loginURL, http.StatusFound)
 		return
@@ -1021,6 +1052,15 @@ func handleSubdomainProxy(w http.ResponseWriter, r *http.Request) {
 	sessionsMu.RUnlock()
 
 	if !ok || sess.IsClosed() {
+		// HA multi-replica: forward to the pod that holds this agent's session
+		if r.Header.Get("X-Internal-Forward") == "" {
+			if remoteIP, remotePort, found := lookupRemotePod(agentID); found {
+				log.Printf("[%s] HTTP proxy: forwarding to pod %s:%d", agentID, remoteIP, remotePort)
+				forwardToPod(w, r, remoteIP, remotePort)
+				return
+			}
+		}
+
 		log.Printf("DEBUG: Session not found or closed for agent %s (ok=%v). Checking scale status...", agentID, ok)
 		// Check if agent is scaled down and attempt scale-up
 		scaledDown, err := isAgentScaledDown(agentID)
@@ -1046,6 +1086,14 @@ func handleSubdomainProxy(w http.ResponseWriter, r *http.Request) {
 		sess, ok = waitForSessionReady(agentID, 10)
 
 		if !ok || sess == nil || sess.IsClosed() {
+			// One more check: agent may have connected to a different pod during scale-up
+			if r.Header.Get("X-Internal-Forward") == "" {
+				if remoteIP, remotePort, found := lookupRemotePod(agentID); found {
+					log.Printf("[%s] HTTP proxy: forwarding to pod %s:%d (post scale-up)", agentID, remoteIP, remotePort)
+					forwardToPod(w, r, remoteIP, remotePort)
+					return
+				}
+			}
 			http.Error(w, "Agent offline", http.StatusBadGateway)
 			return
 		}
@@ -1146,6 +1194,10 @@ func handleAgent(w http.ResponseWriter, r *http.Request) {
 			stats.Online = false
 		}
 		statsMu.Unlock()
+		// Remove pod session record so other replicas stop forwarding here
+		if agentPodSessionRepo != nil {
+			_ = agentPodSessionRepo.Delete(agentID)
+		}
 		log.Printf("[%s] Agent disconnected", agentID)
 	}()
 
@@ -1170,7 +1222,35 @@ func handleAgent(w http.ResponseWriter, r *http.Request) {
 	agentSessions[agentID] = session
 	sessionsMu.Unlock()
 
-	log.Printf("[%s] Session ready", agentID)
+	// Register pod session in PostgreSQL so other replicas know where to forward
+	if agentPodSessionRepo != nil {
+		_ = agentPodSessionRepo.Upsert(&models.AgentPodSession{
+			AgentID:   agentID,
+			PodIP:     podIP,
+			PodPort:   8080,
+			UpdatedAt: time.Now(),
+		})
+	}
+
+	// Heartbeat: refresh UpdatedAt every 2 minutes so other pods can detect stale entries
+	sessionDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(2 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if agentPodSessionRepo != nil {
+					_ = agentPodSessionRepo.Touch(agentID)
+				}
+			case <-sessionDone:
+				return
+			}
+		}
+	}()
+	defer close(sessionDone)
+
+	log.Printf("[%s] Session ready (pod IP: %s)", agentID, podIP)
 	select {}
 }
 
@@ -1273,6 +1353,21 @@ func handleUserConnect(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// HA multi-replica: forward the WebSocket request to the pod holding the agent session
+	// before upgrading the connection on this pod (avoids upgrade-then-fail scenario).
+	if r.Header.Get("X-Internal-Forward") == "" {
+		sessionsMu.RLock()
+		_, localOK := agentSessions[agentID]
+		sessionsMu.RUnlock()
+		if !localOK {
+			if remoteIP, remotePort, found := lookupRemotePod(agentID); found {
+				log.Printf("[%s] SSH WebSocket: forwarding to pod %s:%d", agentID, remoteIP, remotePort)
+				forwardToPod(w, r, remoteIP, remotePort)
+				return
+			}
+		}
+	}
+
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("User [%s] upgrade failed: %v", agentID, err)
@@ -1323,6 +1418,8 @@ func handleUserConnect(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Note: if we reach here via the forwarded (X-Internal-Forward) path and the agent
+	// reconnected to this pod during scale-up, sess is valid and we proceed normally.
 
 	stream, err := sess.Open()
 	if err != nil {
@@ -1639,6 +1736,14 @@ func handleMgmtAgentStats(w http.ResponseWriter, r *http.Request) {
 	statsMu.RUnlock()
 
 	if !ok {
+		// HA: forward to the pod that holds this agent's session so the operator
+		// always gets accurate online/activity stats regardless of which replica it hits.
+		if r.Header.Get("X-Internal-Forward") == "" {
+			if remoteIP, remotePort, found := lookupRemotePod(agentID); found {
+				forwardToPod(w, r, remoteIP, remotePort)
+				return
+			}
+		}
 		http.Error(w, "Agent not found", http.StatusNotFound)
 		return
 	}
@@ -1647,6 +1752,26 @@ func handleMgmtAgentStats(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(stats); err != nil {
 		log.Printf("Failed to encode agent stats: %v", err)
 	}
+}
+
+// isAgentOnline returns true if the agent is currently online.
+// Checks local in-memory stats first; falls back to the PostgreSQL pod session
+// record so HA multi-replica deployments return consistent results on every pod.
+func isAgentOnline(agentID string) bool {
+	statsMu.RLock()
+	stats, exists := agentStats[agentID]
+	statsMu.RUnlock()
+	if exists && stats.Online {
+		return true
+	}
+	if agentPodSessionRepo != nil {
+		if rec, err := agentPodSessionRepo.GetByAgentID(agentID); err == nil && rec != nil {
+			if time.Since(rec.UpdatedAt) <= 5*time.Minute {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Helpers
@@ -2105,9 +2230,15 @@ func handleListAgents(w http.ResponseWriter, r *http.Request) {
 				online = val
 			}
 		}
-		// Prefer real-time stats if available
+		// Prefer real-time stats if available; fall back to pod session record for HA
 		if rtStats != nil && rtStats.Online {
 			online = true
+		} else if rtStats == nil && agentPodSessionRepo != nil {
+			if rec, err := agentPodSessionRepo.GetByAgentID(name); err == nil && rec != nil {
+				if time.Since(rec.UpdatedAt) <= 5*time.Minute {
+					online = true
+				}
+			}
 		}
 
 		phase := "Unknown"
@@ -3909,12 +4040,8 @@ func handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			// Fallback to agentStats if CR not available
-			statsMu.RLock()
-			stats, exists := agentStats[agentID]
-			statsMu.RUnlock()
-
-			if exists && stats.Online {
+			// Fallback: use HA-aware online check (local stats + pod session record)
+			if isAgentOnline(agentID) {
 				service.Status = "running"
 			} else {
 				service.Status = "stopped"
@@ -4430,12 +4557,8 @@ func handleListWorkspaceServices(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Fallback to agentStats if CR not available
-		statsMu.RLock()
-		stats, exists := agentStats[agentID]
-		statsMu.RUnlock()
-
-		if exists && stats.Online {
+		// Fallback: use HA-aware online check (local stats + pod session record)
+		if isAgentOnline(agentID) {
 			services[i].Status = "running"
 		} else {
 			services[i].Status = "stopped"
@@ -5915,12 +6038,8 @@ func handleGetService(w http.ResponseWriter, r *http.Request, serviceID string) 
 			}
 		} else {
 			log.Printf("[handleGetService] Failed to get CR for AgentID %s: %v", agentID, err)
-			// Fallback to agentStats if CR not found
-			statsMu.RLock()
-			stats, exists := agentStats[agentID]
-			statsMu.RUnlock()
-
-			if exists && stats.Online {
+			// Fallback: use HA-aware online check (local stats + pod session record)
+			if isAgentOnline(agentID) {
 				service.Status = "running"
 			} else {
 				service.Status = "stopped"
@@ -6425,7 +6544,7 @@ func createWorkspacePVC(ctx context.Context, userName string, workspace *models.
 				accessMode, // Dynamic based on storage class
 			},
 			StorageClassName: &storageClass,
-			Resources: corev1.ResourceRequirements{
+			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
 					corev1.ResourceStorage: mustParse(storageSize),
 				},
@@ -7012,12 +7131,8 @@ func handleAdminListWorkspaces(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			// Fallback to agentStats if CR not available
-			statsMu.RLock()
-			stats, exists := agentStats[agentID]
-			statsMu.RUnlock()
-
-			if exists && stats.Online {
+			// Fallback: use HA-aware online check (local stats + pod session record)
+			if isAgentOnline(agentID) {
 				service.Status = "running"
 			} else {
 				service.Status = "stopped"
@@ -7288,6 +7403,34 @@ func routeMainDomain(w http.ResponseWriter, r *http.Request) {
 		handleUsers(w, r)
 	case strings.HasPrefix(r.URL.Path, "/api/users/"):
 		handleUserDetail(w, r)
+	case r.URL.Path == "/api/derp-map":
+		handleGetDERPMap(w, r)
+	case r.URL.Path == "/derp" || strings.HasPrefix(r.URL.Path, "/derp/"):
+		// DERP relay endpoint – stateless, safe for multi-replica HA
+		if derpHTTPHandler != nil {
+			derpHTTPHandler.ServeHTTP(w, r)
+		} else {
+			http.NotFound(w, r)
+		}
+	case strings.HasPrefix(r.URL.Path, "/derp-pod/"):
+		// Pod-specific DERP endpoint: ensures CLI and Agent connect to the SAME
+		// DERP instance. Proxied to the target pod if not served locally.
+		handleDERPPod(w, r)
+	case strings.HasPrefix(r.URL.Path, "/api/agent-coordination/"):
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/peer") {
+			// CLI registers its WireGuard public key; server forwards it to the agent.
+			handleRegisterCLIPeer(w, r)
+		} else if r.Method == http.MethodPost {
+			// Agent registers its own WireGuard public key.
+			handleAgentRegisterCoordination(w, r)
+		} else {
+			// CLI or agent fetches coordination info.
+			handleGetAgentCoordination(w, r)
+		}
+	case strings.HasPrefix(r.URL.Path, "/internal/send-control/"):
+		// Internal inter-pod endpoint: forward WireGuard peer notification to local agent session.
+		// Only reachable from within the cluster (no external route in Ingress).
+		handleInternalSendControl(w, r)
 	case strings.HasPrefix(r.URL.Path, "/ws"):
 		handleAgent(w, r)
 	case strings.HasPrefix(r.URL.Path, "/connect/"):
@@ -8389,6 +8532,351 @@ func copyAgentAuthSecretToNamespace(targetNamespace string) error {
 	return nil
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// DERP relay + WireGuard coordination
+// ──────────────────────────────────────────────────────────────────────────────
+
+// handleRegisterCLIPeer handles POST /api/agent-coordination/{agentID}/peer.
+// A CLI user calls this to register their WireGuard public key; the server
+// immediately forwards it to the agent via the Yamux control channel so the
+// agent can add the CLI user as a WireGuard peer.
+func handleRegisterCLIPeer(w http.ResponseWriter, r *http.Request) {
+	_, err := validateToken(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Path: /api/agent-coordination/{agentID}/peer
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/agent-coordination/")
+	agentID := strings.TrimSuffix(trimmed, "/peer")
+	if agentID == "" || agentID == trimmed {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		UserPublicKey string   `json:"user_public_key"`
+		Endpoints     []string `json:"endpoints"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.UserPublicKey == "" {
+		http.Error(w, "user_public_key required", http.StatusBadRequest)
+		return
+	}
+
+	// Notify the agent of the new CLI peer. If the agent is offline, return 503
+	// so the CLI immediately falls back to the WebSocket relay path instead of
+	// hanging indefinitely waiting for a DERP session that will never open.
+	if notifyErr := sendWireGuardPeerToAgent(agentID, req.UserPublicKey, req.Endpoints); notifyErr != nil {
+		log.Printf("WireGuard peer notify for agent %s: %v (agent offline, CLI will use WebSocket relay)", agentID, notifyErr)
+		http.Error(w, `{"error":"agent offline"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"derp_map": buildDERPMap(),
+	})
+}
+
+// initDERP initialises the embedded DERP relay server.
+// DERP is stateless: each server replica can serve DERP independently.
+func initDERP() {
+	serverNodeKey = key.NewNode()
+	derpSrv = derp.NewServer(serverNodeKey, tslogger.Discard)
+	derpHTTPHandler = derphttp.Handler(derpSrv)
+	log.Printf("DERP relay initialised (public key: %s)", serverNodeKey.Public().String()[:16])
+}
+
+// buildDERPMap returns a DERPMap descriptor that clients use to discover
+// the DERP relay.  The format mirrors the Tailscale control-plane API.
+func buildDERPMap() map[string]interface{} {
+	publicHost := strings.TrimPrefix(frpURL, "https://")
+	publicHost = strings.TrimPrefix(publicHost, "http://")
+	// Strip port if present (e.g. "localhost:8080")
+	if h, _, err := net.SplitHostPort(publicHost); err == nil {
+		publicHost = h
+	}
+	return map[string]interface{}{
+		"Regions": map[string]interface{}{
+			"1": map[string]interface{}{
+				"RegionID":   1,
+				"RegionCode": "default",
+				"RegionName": "KubeRDE Default",
+				"Nodes": []map[string]interface{}{
+					{
+						"Name":     "1a",
+						"RegionID": 1,
+						"HostName": publicHost,
+						"DERPPort": 443,
+						"STUNPort": -1,
+					},
+				},
+			},
+		},
+	}
+}
+
+// handleGetDERPMap returns the DERPMap JSON that clients/agents use for DERP
+// relay discovery.
+func handleGetDERPMap(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(buildDERPMap())
+}
+
+// handleAgentRegisterCoordination handles POST /api/agent-coordination/{agentID}.
+// Agents call this to register their WireGuard public key and STUN endpoints.
+func handleAgentRegisterCoordination(w http.ResponseWriter, r *http.Request) {
+	if wireguardRepo == nil {
+		http.Error(w, "WireGuard coordination unavailable (DB not ready)", http.StatusServiceUnavailable)
+		return
+	}
+	_, err := validateToken(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	agentID := strings.TrimPrefix(r.URL.Path, "/api/agent-coordination/")
+	if agentID == "" {
+		http.Error(w, "agentID required", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		PublicKey string   `json:"public_key"`
+		Endpoints []string `json:"endpoints"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	endpointsJSON, _ := json.Marshal(req.Endpoints)
+	peer := &models.AgentWireguardPeer{
+		AgentID:   agentID,
+		PublicKey: req.PublicKey,
+		Endpoints: string(endpointsJSON),
+		UpdatedAt: time.Now(),
+	}
+	if err := wireguardRepo.Upsert(peer); err != nil {
+		http.Error(w, "failed to store peer", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"derp_map": buildDERPMap(),
+		"derp_url": derpURLForAgent(agentID),
+	})
+}
+
+// handleGetAgentCoordination handles GET /api/agent-coordination/{agentID}.
+// CLI users call this to retrieve an agent's WireGuard public key and endpoints.
+func handleGetAgentCoordination(w http.ResponseWriter, r *http.Request) {
+	if wireguardRepo == nil {
+		http.Error(w, "WireGuard coordination unavailable (DB not ready)", http.StatusServiceUnavailable)
+		return
+	}
+	_, err := validateToken(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	agentID := strings.TrimPrefix(r.URL.Path, "/api/agent-coordination/")
+	if agentID == "" {
+		http.Error(w, "agentID required", http.StatusBadRequest)
+		return
+	}
+
+	peer, err := wireguardRepo.GetByAgentID(agentID)
+	if err != nil || peer == nil {
+		http.Error(w, "Agent coordination info not found", http.StatusNotFound)
+		return
+	}
+
+	var endpoints []string
+	json.Unmarshal([]byte(peer.Endpoints), &endpoints)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"agent_id":   peer.AgentID,
+		"public_key": peer.PublicKey,
+		"endpoints":  endpoints,
+		"derp_map":   buildDERPMap(),
+		"derp_url":   derpURLForAgent(agentID),
+	})
+}
+
+// derpURLForAgent returns a pod-specific DERP URL for the given agent.
+// With multiple server replicas, each pod runs its own DERP server instance.
+// CLI and Agent must connect to the SAME instance for the relay to work.
+// We achieve this by encoding the pod IP in the URL; any pod receiving
+// /derp-pod/{podIP} proxies the WebSocket to that pod's local DERP server.
+func derpURLForAgent(agentID string) string {
+	if agentPodSessionRepo != nil {
+		if rec, err := agentPodSessionRepo.GetByAgentID(agentID); err == nil && rec != nil {
+			if time.Since(rec.UpdatedAt) <= 5*time.Minute {
+				return frpURL + "/derp-pod/" + rec.PodIP
+			}
+		}
+	}
+	return frpURL + "/derp"
+}
+
+// handleDERPPod serves or proxies DERP WebSocket to the pod at the IP in the URL.
+// Route: /derp-pod/{podIP}
+// If the request arrives at the target pod, DERP is served directly.
+// Otherwise it is reverse-proxied to the target pod's /derp endpoint,
+// making DERP work correctly across server replicas.
+func handleDERPPod(w http.ResponseWriter, r *http.Request) {
+	targetPodIP := strings.TrimPrefix(r.URL.Path, "/derp-pod/")
+	// Reject paths with extra segments (e.g. "/derp-pod/1.2.3.4/something")
+	if targetPodIP == "" || strings.Contains(targetPodIP, "/") {
+		http.NotFound(w, r)
+		return
+	}
+
+	if targetPodIP == podIP {
+		// This is the target pod — serve DERP locally
+		if derpHTTPHandler != nil {
+			derpHTTPHandler.ServeHTTP(w, r)
+		} else {
+			http.NotFound(w, r)
+		}
+		return
+	}
+
+	// Proxy to the target pod (supports WebSocket upgrades for DERP)
+	proxy := httputil.NewSingleHostReverseProxy(&url.URL{
+		Scheme: "http",
+		Host:   fmt.Sprintf("%s:8080", targetPodIP),
+	})
+	proxy.Director = func(req *http.Request) {
+		req.URL.Scheme = "http"
+		req.URL.Host = fmt.Sprintf("%s:8080", targetPodIP)
+		req.URL.Path = "/derp"
+		req.Host = fmt.Sprintf("%s:8080", targetPodIP)
+	}
+	proxy.ServeHTTP(w, r)
+}
+
+// lookupRemotePod returns the IP and port of the server pod that holds the agent's
+// Yamux session, if it is NOT on the current pod. Returns found=false when the
+// session is local, when no record exists, or when the record is stale (>5 min).
+func lookupRemotePod(agentID string) (ip string, port int, found bool) {
+	if agentPodSessionRepo == nil {
+		return "", 0, false
+	}
+	rec, err := agentPodSessionRepo.GetByAgentID(agentID)
+	if err != nil || rec == nil {
+		return "", 0, false
+	}
+	// Ignore stale records (pod may have crashed without cleanup)
+	if time.Since(rec.UpdatedAt) > 5*time.Minute {
+		return "", 0, false
+	}
+	// The session is on this pod – no forwarding needed
+	if rec.PodIP == podIP {
+		return "", 0, false
+	}
+	return rec.PodIP, rec.PodPort, true
+}
+
+// forwardToPod reverse-proxies the HTTP (or WebSocket) request to targetIP:targetPort,
+// adding X-Internal-Forward to prevent forwarding loops.
+func forwardToPod(w http.ResponseWriter, r *http.Request, targetIP string, targetPort int) {
+	target := &url.URL{Scheme: "http", Host: fmt.Sprintf("%s:%d", targetIP, targetPort)}
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	origDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		origDirector(req)
+		req.Header.Set("X-Internal-Forward", "true")
+	}
+	proxy.ServeHTTP(w, r)
+}
+
+// handleInternalSendControl receives a WireGuard peer notification forwarded
+// from another pod and delivers it to the agent via the local Yamux session.
+// Route: POST /internal/send-control/{agentID}
+func handleInternalSendControl(w http.ResponseWriter, r *http.Request) {
+	agentID := strings.TrimPrefix(r.URL.Path, "/internal/send-control/")
+	if agentID == "" {
+		http.Error(w, "missing agentID", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		UserPublicKey string   `json:"user_public_key"`
+		Endpoints     []string `json:"endpoints"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := sendWireGuardPeerToAgent(agentID, req.UserPublicKey, req.Endpoints); err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// sendWireGuardPeerToAgent notifies an agent (via the existing Yamux control
+// channel) that a new WireGuard peer wants to connect.
+func sendWireGuardPeerToAgent(agentID, userPublicKey string, userEndpoints []string) error {
+	sessionsMu.RLock()
+	sess, ok := agentSessions[agentID]
+	sessionsMu.RUnlock()
+
+	if !ok || sess.IsClosed() {
+		// Check if agent is on a different server pod and forward there
+		if remoteIP, remotePort, found := lookupRemotePod(agentID); found {
+			log.Printf("[%s] WireGuard control: forwarding to pod %s:%d", agentID, remoteIP, remotePort)
+			payload, _ := json.Marshal(map[string]interface{}{
+				"user_public_key": userPublicKey,
+				"endpoints":       userEndpoints,
+			})
+			resp, err := http.Post(
+				fmt.Sprintf("http://%s:%d/internal/send-control/%s", remoteIP, remotePort, agentID),
+				"application/json",
+				bytes.NewReader(payload),
+			)
+			if err != nil {
+				return fmt.Errorf("forward to pod %s:%d: %w", remoteIP, remotePort, err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				return fmt.Errorf("pod %s:%d returned %d", remoteIP, remotePort, resp.StatusCode)
+			}
+			return nil
+		}
+		return fmt.Errorf("agent %s not connected via WebSocket relay", agentID)
+	}
+
+	ctrlStream, err := sess.Open()
+	if err != nil {
+		return err
+	}
+	defer ctrlStream.Close()
+
+	// Write control-stream marker byte (0x01) so the agent can distinguish
+	// control messages from regular data streams.
+	if _, err := ctrlStream.Write([]byte{0x01}); err != nil {
+		return err
+	}
+
+	msg := map[string]interface{}{
+		"type":       "add_wireguard_peer",
+		"public_key": userPublicKey,
+		"endpoints":  userEndpoints,
+		"derp_map":   buildDERPMap(),
+		"derp_url":   derpURLForAgent(agentID),
+	}
+	return json.NewEncoder(ctrlStream).Encode(msg)
+}
+
 func main() {
 	initAuth()
 
@@ -8402,6 +8890,13 @@ func main() {
 		log.Fatalf("FATAL: %v. Pod will restart.", err)
 	}
 
+	wireguardRepo = repositories.NewWireguardRepository(db)
+	log.Println("✓ WireGuard coordination repository initialised")
+
+	agentPodSessionRepo = repositories.NewAgentPodSessionRepository(db)
+	log.Printf("✓ Agent pod session repository initialised (this pod IP: %s)", podIP)
+
+	initDERP()
 	initKubernetes()
 
 	// Initialize admin team (DB + K8s resources)

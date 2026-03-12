@@ -40,11 +40,12 @@ The CLI tool handles authentication and SSH connections.
 # Download CLI binary
 curl -LO https://github.com/xsoloking/kube-rde/releases/latest/download/kuberde-cli-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)
 
-# Make executable
-chmod +x kuberde-cli-*
+# Rename to kuberde-cli
+mv kuberde-cli-* kuberde-cli
+chmod +x kuberde-cli
 
 # Move to PATH
-sudo mv kuberde-cli-* /usr/local/bin/kuberde-cli
+sudo mv kuberde-cli /usr/local/bin/kuberde-cli
 
 # Verify installation
 kuberde-cli version
@@ -69,27 +70,17 @@ kuberde-cli version v1.0.0
 
 ### Step 2: Configure Server URL
 
-Tell the CLI where your KubeRDE server is:
+Configure the server URL and set up SSH config in one step:
 
-**For local development:**
 ```bash
-kuberde-cli config set server http://localhost:8080
+# Configure server URL and set up SSH config in one step
+kuberde-cli config-ssh --server https://kuberde.example.com --write
+
+# For local development
+kuberde-cli config-ssh --server http://localhost:8080 --write
 ```
 
-**For kind/minikube:**
-```bash
-kuberde-cli config set server http://kuberde.local
-```
-
-**For production:**
-```bash
-kuberde-cli config set server https://kuberde.example.com
-```
-
-Verify configuration:
-```bash
-kuberde-cli config show
-```
+This saves the server URL to `~/.kuberde/server` and writes a `Host kuberde-*` block to `~/.ssh/config`.
 
 ### Step 3: Login
 
@@ -104,7 +95,7 @@ kuberde-cli login
 2. Redirects to Keycloak login page
 3. Enter your credentials (admin/admin or your user)
 4. Redirected back with success message
-5. Token saved to `~/.frp/token.json`
+5. Token saved to `~/.kuberde/token.json`
 
 **Manual login (if browser doesn't open):**
 ```bash
@@ -140,20 +131,19 @@ my-dev-workspace     admin    Online    ssh-server, jupyter-lab
 
 ### Step 5: Connect via SSH
 
-Connect to your workspace:
+After running `config-ssh --write` in Step 2, connect directly by agent ID:
 
 ```bash
-kuberde-cli connect my-dev-workspace
-```
+# Connect using agent ID directly
+ssh kuberde-agent-admin-my-dev-workspace-ssh-abc123
 
-Or using the full agent ID:
-```bash
-kuberde-cli connect user-admin-my-dev-workspace
+# Or use kuberde-cli connect directly:
+kuberde-cli connect kuberde-agent-admin-my-dev-workspace-ssh-abc123
 ```
 
 **First connection:**
 ```
-The authenticity of host 'user-admin-my-dev-workspace' can't be established.
+The authenticity of host 'kuberde-agent-admin-my-dev-workspace-ssh-abc123' can't be established.
 ED25519 key fingerprint is SHA256:...
 Are you sure you want to continue connecting (yes/no/[fingerprint])? yes
 ```
@@ -162,7 +152,7 @@ Type `yes` and press Enter.
 
 **You're in!**
 ```
-admin@my-dev-workspace:~$
+root@my-dev-workspace:~#
 ```
 
 Try some commands:
@@ -219,36 +209,23 @@ No password prompt!
 
 ### Step 7: Configure SSH Config (Optional but Recommended)
 
-Make connections even easier with SSH config:
+The `config-ssh --write` command in Step 2 already set this up. You can re-run it to update or verify:
 
-**Edit `~/.ssh/config`:**
 ```bash
-nano ~/.ssh/config
-```
+# Auto-generate and install SSH config (already done in Step 2)
+kuberde-cli config-ssh --server https://kuberde.example.com --write
 
-**Add configuration:**
-```
-# KubeRDE Workspaces
-Host *.kuberde.local
-    ProxyCommand kuberde-cli connect %h
-    StrictHostKeyChecking no
-    UserKnownHostsFile /dev/null
-    ServerAliveInterval 30
-    ServerAliveCountMax 3
+# The generated block in ~/.ssh/config:
+# Host kuberde-*
+#     ProxyCommand kuberde-cli connect %n
+#     User root
+#     StrictHostKeyChecking no
+#     UserKnownHostsFile /dev/null
+#     ServerAliveInterval 30
+#     ServerAliveCountMax 3
 
-# Specific workspace alias
-Host mydev
-    HostName user-admin-my-dev-workspace.kuberde.local
-    ProxyCommand kuberde-cli connect user-admin-my-dev-workspace
-```
-
-**Now connect easily:**
-```bash
-# Using full name
-ssh user-admin-my-dev-workspace.kuberde.local
-
-# Using alias
-ssh mydev
+# Connect:
+ssh kuberde-agent-admin-my-dev-workspace-ssh-abc123
 ```
 
 ### Step 8: Advanced SSH Features
@@ -363,7 +340,7 @@ kubectl logs -n kuberde -l kuberde.io/workspace=my-dev-workspace
 **Token expired:**
 ```bash
 # Remove old token
-rm ~/.frp/token.json
+rm ~/.kuberde/token.json
 
 # Login again
 kuberde-cli login
@@ -452,33 +429,24 @@ Now that you can access workspaces via SSH:
 ## Quick Reference
 
 ```bash
-# Install CLI
-curl -LO https://github.com/xsoloking/kube-rde/releases/latest/download/kuberde-cli-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)
+# Install CLI (rename after download)
+mv kuberde-cli-* kuberde-cli && chmod +x kuberde-cli
+sudo mv kuberde-cli /usr/local/bin/kuberde-cli
 
-# Configure
-kuberde-cli config set server http://kuberde.local
+# Configure server + SSH config
+kuberde-cli config-ssh --server https://kuberde.example.com --write
 
 # Login
-kuberde-cli login
+kuberde-cli login --issuer https://sso.example.com/realms/kuberde
 
-# List workspaces
-kuberde-cli workspaces list
-
-# Connect
-kuberde-cli connect my-dev-workspace
-
-# SSH config
-Host *.kuberde.local
-    ProxyCommand kuberde-cli connect %h
-
-# Connect with alias
-ssh mydev
+# Connect by agent ID
+ssh kuberde-agent-admin-my-dev-workspace-ssh-abc123
 
 # Port forward
-ssh -L 8888:localhost:8888 mydev
+ssh -L 8888:localhost:8888 kuberde-agent-admin-my-dev-workspace-ssh-abc123
 
 # File transfer
-scp file.txt mydev:~/
+scp file.txt kuberde-agent-admin-my-dev-workspace-ssh-abc123:~/
 ```
 
 ## Video Tutorial
