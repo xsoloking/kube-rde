@@ -32,7 +32,7 @@ func NewAgentPodSessionRepository(db *gorm.DB) AgentPodSessionRepository {
 func (r *agentPodSessionRepository) Upsert(s *models.AgentPodSession) error {
 	return r.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "agent_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"pod_ip", "pod_port", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"pod_ip", "pod_port", "cluster_name", "updated_at"}),
 	}).Create(s).Error
 }
 
