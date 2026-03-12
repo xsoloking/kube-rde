@@ -298,8 +298,72 @@ with Diagram(
     ) >> operator_reconcile
 
 
+# ─── Diagram 4: Multi-Cluster Architecture (Karmada) ─────────────────────────
+with Diagram(
+    "KubeRDE Multi-Cluster Architecture",
+    filename="docs/kuberde_multi_cluster",
+    show=False,
+    direction="TB",
+    graph_attr=graph_attr,
+    outformat="png"
+):
+    # Hub cluster
+    with Cluster("Hub Cluster (existing KubeRDE)"):
+        with Cluster("KubeRDE Control Plane"):
+            hub_server = Server("Server × 3\n(HA + DERP)")
+            hub_db = PostgreSQL("PostgreSQL\n(agent_pod_sessions)")
+            hub_server >> Edge(label="session tracking") >> hub_db
+
+        with Cluster("Karmada Control Plane"):
+            karmada_api = APIServer("karmada-apiserver")
+            karmada_ctrl = Deployment("controller-manager\n+ scheduler")
+            karmada_api >> karmada_ctrl
+
+    # Server creates PropagationPolicies via Karmada API
+    hub_server >> Edge(
+        label="PropagationPolicy\n(per team/agent)",
+        color="purple",
+        style="bold"
+    ) >> karmada_api
+
+    # Member clusters
+    with Cluster("Cluster-A (Team Alpha)"):
+        op_a = Deployment("Operator-A")
+        agent_a = Pod("Agent Pods\n(kuberde-alpha)")
+        op_a >> Edge(label="reconcile") >> agent_a
+
+    with Cluster("Cluster-B (Team Beta)"):
+        op_b = Deployment("Operator-B")
+        agent_b = Pod("Agent Pods\n(kuberde-beta)")
+        op_b >> Edge(label="reconcile") >> agent_b
+
+    with Cluster("Cluster-C (GPU Pool)"):
+        op_c = Deployment("Operator-C")
+        agent_c = Pod("Agent Pods\n(kuberde-gpu)")
+        op_c >> Edge(label="reconcile") >> agent_c
+
+    # Karmada propagates CRD + Operator + RDEAgent CRs to member clusters
+    karmada_ctrl >> Edge(
+        label="Propagate CRD\n+ Operator\n+ RDEAgent CR",
+        color="purple",
+        style="dashed"
+    ) >> op_a
+    karmada_ctrl >> Edge(style="dashed", color="purple") >> op_b
+    karmada_ctrl >> Edge(style="dashed", color="purple") >> op_c
+
+    # Agents connect back to Hub
+    agent_a >> Edge(
+        label="WebSocket + JWT\n→ Hub public URL",
+        color="green",
+        style="bold"
+    ) >> hub_server
+    agent_b >> Edge(color="green", style="bold") >> hub_server
+    agent_c >> Edge(color="green", style="bold") >> hub_server
+
+
 print("✅ Architecture diagrams generated successfully!")
 print("   - docs/kuberde_architecture.png")
 print("   - docs/kuberde_data_flow.png")
 print("   - docs/kuberde_operator_lifecycle.png")
+print("   - docs/kuberde_multi_cluster.png")
 print("\nTo regenerate, run: python docs/architecture.py")

@@ -1067,3 +1067,98 @@ v2.0 (Vision - 2026)
 - Deployment: `/deploy/k8s/`
 - Developer guide: `CLAUDE.md`
 - Operations: `docs/guides/OPERATORS_RUNBOOK.md`
+
+---
+
+## 7. Multi-Cluster Architecture (Karmada)
+
+KubeRDE supports optional Karmada-based multi-cluster scheduling. When enabled, Agent workloads can be placed on dedicated member clusters while the control plane remains on the Hub cluster.
+
+### 7.1 Topology
+
+```
+Hub Cluster (existing KubeRDE cluster)
+├── KubeRDE: Server × 3 (HA + DERP), PostgreSQL, Keycloak, Web UI
+└── Karmada: karmada-apiserver, controller-manager, scheduler
+         │
+         │ PropagationPolicy / OverridePolicy
+         ▼
+┌─────────────┐   ┌─────────────┐   ┌─────────────┐
+│  Cluster-A  │   │  Cluster-B  │   │  Cluster-C  │
+│ (Team Alpha)│   │ (Team Beta) │   │  (GPU Pool) │
+│  Operator   │   │  Operator   │   │  Operator   │
+│  Agent Pods │   │  Agent Pods │   │  Agent Pods │
+└──────┬──────┘   └──────┬──────┘   └──────┬──────┘
+       └──────────────────┴──────────────────┘
+                          │
+             WebSocket + JWT → Hub Server public URL
+             agent_pod_sessions records Hub pod IP (unchanged)
+```
+
+### 7.2 Key Design Decisions
+
+| Problem | Decision | Rationale |
+|---------|----------|-----------|
+| Operator placement | Per-member-cluster | Zero code changes; Karmada propagates CR, Operator reconciles locally |
+| Cross-cluster connectivity | Agent connects to Hub public URL | Existing HA mechanism fully reused; `agent_pod_sessions` unchanged |
+| Namespace management | `ClusterPropagationPolicy` pushes NS + Secret | Declared on Hub, auto-synced to members |
+| Storage class differences | `OverridePolicy` substitutes `storageClassName` per cluster | Cluster-specific storage without modifying RDEAgent spec |
+| DERP relay routing | `/derp-pod/{podIP}` unchanged | Agent in member cluster, but Yamux/DERP session on Hub pod |
+| Tenant isolation | Namespace isolation (existing) + cluster isolation (new) | High-value tenants can have dedicated clusters |
+
+### 7.3 Data Flow with Karmada
+
+1. Admin creates a Team with `cluster_name = "cluster-a"` (via Web UI or API)
+2. Server creates the K8s Namespace on Hub + copies auth Secret
+3. Server creates a `ClusterPropagationPolicy` → Karmada propagates NS + Secret to `cluster-a`
+4. User creates a Service → Server creates RDEAgent CR + `PropagationPolicy` routing to `cluster-a`
+5. Karmada propagates the RDEAgent CR; the local Operator creates the Agent Deployment
+6. Agent Pod connects back to Hub Server via `KUBERDE_AGENT_SERVER_URL` (public WebSocket URL)
+7. SSH/browser clients connect through Hub as before — no change in user experience
+
+### 7.4 Backward Compatibility
+
+| Scenario | Behavior |
+|----------|----------|
+| `KARMADA_KUBECONFIG` Secret absent | `karmadaEnabled=false`; all single-cluster paths unchanged |
+| Team `cluster_name = "default"` | No PropagationPolicy; RDEAgent scheduled on Hub cluster |
+| `GET /api/clusters` in single-cluster mode | Returns `[{"name":"default","status":"Ready"}]` |
+| Existing `agent_pod_sessions` rows | `cluster_name` defaults to `"default"`; HA routing unchanged |
+
+### 7.5 Architecture Decision Records
+
+---
+
+#### ADR-014: Karmada for Multi-Cluster Management
+
+**Status**: Accepted (2026-03-13)
+
+**Context**: Need to schedule Agent workloads to dedicated clusters per team without changing the control plane or Agent code.
+
+**Decision**: Use Karmada v1.9+ as the multi-cluster control plane. Karmada acts as a Kubernetes-compatible API extension; the Server creates PropagationPolicies via the standard `k8s.io/client-go` dynamic client pointed at the Karmada apiserver. No `github.com/karmada-io/karmada` SDK dependency required.
+
+**Alternatives Considered**:
+- KubeFed v2: Deprecated, limited community support
+- Custom multi-cluster controller: High development cost, not production-ready
+- Separate KubeRDE Server per cluster: Loses unified control plane
+
+**Consequences**:
+- Hub cluster requires Karmada control plane components (~3 pods)
+- Member clusters must run KubeRDE Operator (propagated automatically)
+- PropagationPolicy lifecycle tied to Agent lifecycle (created/deleted by Server)
+
+---
+
+#### ADR-015: Operator Deployed to Each Member Cluster
+
+**Status**: Accepted (2026-03-13)
+
+**Context**: Where should the KubeRDE Operator run when agents are in member clusters?
+
+**Decision**: Operator runs locally in each member cluster, propagated by Karmada. Each Operator instance watches only its own cluster's RDEAgent CRs and creates local Deployments/PVCs.
+
+**Rationale**: Zero Operator code changes required. Karmada handles the CR propagation; each Operator reconciles normally as if in a single-cluster environment. `SERVER_BASE_URL` points to the Hub's public URL for polling `/mgmt/agents/{id}`.
+
+**Consequences**:
+- Operator image must be available in member cluster's registry (or use shared registry)
+- `SERVER_BASE_URL` env var must be set to Hub public URL in all Operator instances
