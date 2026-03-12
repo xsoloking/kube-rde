@@ -7631,9 +7631,59 @@ func routeMainDomain(w http.ResponseWriter, r *http.Request) {
 		handleUserTeamQuota(w, r)
 	case strings.HasPrefix(r.URL.Path, "/download/cli/"):
 		handleDownloadCLI(w, r)
+	case r.URL.Path == "/api/clusters":
+		requireRole("admin")(handleListClusters)(w, r)
 	default:
 		_, _ = fmt.Fprintf(w, "<h1>FRP Server</h1><p>Logged in? Check cookie.</p><a href='/auth/login'>Login</a>")
 	}
+}
+
+// handleListClusters returns the list of Karmada member clusters available for team scheduling.
+// In single-cluster mode it returns a synthetic "default" entry.
+// Admin-only; used by the Web UI team creation form.
+func handleListClusters(w http.ResponseWriter, r *http.Request) {
+	type clusterEntry struct {
+		Name   string `json:"name"`
+		Status string `json:"status"`
+	}
+
+	if !karmadaEnabled {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]clusterEntry{
+			{Name: "default", Status: "Ready"},
+		})
+		return
+	}
+
+	clusterGVR := schema.GroupVersionResource{
+		Group:    "cluster.karmada.io",
+		Version:  "v1alpha1",
+		Resource: "clusters",
+	}
+	clusterList, err := karmadaClient.Resource(clusterGVR).List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		http.Error(w, "Failed to list clusters: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	result := []clusterEntry{{Name: "default", Status: "Ready"}}
+	for _, c := range clusterList.Items {
+		status := "Unknown"
+		if statusObj, ok := c.Object["status"].(map[string]interface{}); ok {
+			if conds, ok := statusObj["conditions"].([]interface{}); ok {
+				for _, cond := range conds {
+					if cm, ok := cond.(map[string]interface{}); ok &&
+						cm["type"] == "Ready" && cm["status"] == "True" {
+						status = "Ready"
+					}
+				}
+			}
+		}
+		result = append(result, clusterEntry{Name: c.GetName(), Status: status})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
 }
 
 // routeWorkspaceRequest handles workspace-specific routing
