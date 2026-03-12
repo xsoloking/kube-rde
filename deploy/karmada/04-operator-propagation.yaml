@@ -1,0 +1,33 @@
+# Propagate KubeRDE Operator to all member clusters.
+# The Operator runs in each member cluster, watching locally propagated RDEAgent CRs
+# and creating Deployments/PVCs. No code changes to Operator required.
+#
+# Apply with: kubectl apply -f deploy/karmada/04-operator-propagation.yaml --kubeconfig=/tmp/karmada.kubeconfig
+---
+apiVersion: policy.karmada.io/v1alpha1
+kind: ClusterPropagationPolicy
+metadata:
+  name: kuberde-operator-propagation
+spec:
+  resourceSelectors:
+  - apiVersion: apps/v1
+    kind: Deployment
+    name: kuberde-operator
+    namespace: kuberde
+  - apiVersion: v1
+    kind: ServiceAccount
+    name: kuberde-operator
+    namespace: kuberde
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    name: kuberde-operator-role
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    name: kuberde-operator-binding
+  placement:
+    clusterAffinity:
+      matchExpressions:
+      - key: kuberde.io/member
+        operator: In
+        values:
+        - "true"

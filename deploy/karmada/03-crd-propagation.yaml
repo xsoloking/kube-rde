@@ -1,0 +1,24 @@
+# Propagate KubeRDE CRD to all member clusters.
+# Apply with: kubectl apply -f deploy/karmada/03-crd-propagation.yaml --kubeconfig=/tmp/karmada.kubeconfig
+#
+# Prerequisites:
+#   1. Member clusters joined and labeled: kubectl label cluster <name> kuberde.io/member=true
+#   2. RDEAgent CRD applied to Karmada control plane:
+#      kubectl apply -f deploy/k8s/01-crd.yaml --kubeconfig=/tmp/karmada.kubeconfig
+---
+apiVersion: policy.karmada.io/v1alpha1
+kind: ClusterPropagationPolicy
+metadata:
+  name: kuberde-crd-propagation
+spec:
+  resourceSelectors:
+  - apiVersion: apiextensions.k8s.io/v1
+    kind: CustomResourceDefinition
+    name: rdeagents.kuberde.io
+  placement:
+    clusterAffinity:
+      matchExpressions:
+      - key: kuberde.io/member
+        operator: In
+        values:
+        - "true"
