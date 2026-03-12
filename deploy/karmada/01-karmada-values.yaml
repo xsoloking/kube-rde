@@ -1,0 +1,18 @@
+# Karmada Helm chart values for KubeRDE hub cluster deployment
+# Reference: https://github.com/karmada-io/karmada/tree/master/charts/karmada
+
+apiServer:
+  hostNetwork: false
+  serviceType: ClusterIP  # Hub internal access only; not exposed externally
+
+etcd:
+  mode: internal  # Embedded etcd; for production consider external etcd cluster
+
+controllerManager:
+  replicaCount: 2
+
+scheduler:
+  replicaCount: 2
+
+webhook:
+  replicaCount: 2
