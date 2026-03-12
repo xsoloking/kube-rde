@@ -3402,6 +3402,15 @@ func handleDeleteUser(w http.ResponseWriter, r *http.Request, userID string) {
 					} else {
 						log.Printf("✓ Deleted RDEAgent CR: %s from namespace %s", service.AgentID, workspaceNamespace)
 					}
+					// Karmada: clean up PropagationPolicy for this agent
+					if karmadaEnabled {
+						ppErr := karmadaClient.Resource(propagationPolicyGVR).
+							Namespace(workspaceNamespace).
+							Delete(ctx, service.AgentID, metav1.DeleteOptions{})
+						if ppErr != nil && !strings.Contains(ppErr.Error(), "not found") {
+							log.Printf("WARNING: Failed to delete PropagationPolicy %s: %v", service.AgentID, ppErr)
+						}
+					}
 				}
 			}
 
@@ -4409,6 +4418,15 @@ func handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					log.Printf("WARNING: Failed to delete agent CR %s: %v", service.AgentID, err)
 				}
+				// Karmada: clean up PropagationPolicy for this agent
+				if karmadaEnabled {
+					ppErr := karmadaClient.Resource(propagationPolicyGVR).
+						Namespace(targetNamespace).
+						Delete(context.TODO(), service.AgentID, metav1.DeleteOptions{})
+					if ppErr != nil && !strings.Contains(ppErr.Error(), "not found") {
+						log.Printf("WARNING: Failed to delete PropagationPolicy %s: %v", service.AgentID, ppErr)
+					}
+				}
 			}
 		}
 	}
@@ -5374,6 +5392,15 @@ func handleDeleteService(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			log.Printf("✓ Deleted RDEAgent CR %s from namespace %s for service %s", service.AgentID, targetNamespace, serviceID)
+		}
+		// Karmada: clean up PropagationPolicy for this agent
+		if karmadaEnabled {
+			ppErr := karmadaClient.Resource(propagationPolicyGVR).
+				Namespace(targetNamespace).
+				Delete(ctx, service.AgentID, metav1.DeleteOptions{})
+			if ppErr != nil && !strings.Contains(ppErr.Error(), "not found") {
+				log.Printf("WARNING: Failed to delete PropagationPolicy %s: %v", service.AgentID, ppErr)
+			}
 		}
 	}
 
@@ -7841,6 +7868,15 @@ func deleteWorkspaceWithResources(workspace *models.Workspace, namespace string)
 				err := dynamicClient.Resource(frpAgentGVR).Namespace(namespace).Delete(ctx, service.AgentID, metav1.DeleteOptions{})
 				if err != nil && !strings.Contains(err.Error(), "not found") {
 					log.Printf("Warning: Failed to delete agent CR %s: %v", service.AgentID, err)
+				}
+				// Karmada: clean up PropagationPolicy for this agent
+				if karmadaEnabled {
+					ppErr := karmadaClient.Resource(propagationPolicyGVR).
+						Namespace(namespace).
+						Delete(ctx, service.AgentID, metav1.DeleteOptions{})
+					if ppErr != nil && !strings.Contains(ppErr.Error(), "not found") {
+						log.Printf("WARNING: Failed to delete PropagationPolicy %s: %v", service.AgentID, ppErr)
+					}
 				}
 			}
 		}
