@@ -3,7 +3,9 @@ import { Link } from 'react-router-dom';
 import {
   teamsApi,
   usersApi,
+  clustersApi,
   Team,
+  ClusterEntry,
   CreateTeamRequest,
   UpdateTeamRequest,
   User,
@@ -37,15 +39,20 @@ const TeamManagement: React.FC = () => {
   const [showAddMemberDropdown, setShowAddMemberDropdown] = useState(false);
   const [addingMember, setAddingMember] = useState(false);
 
+  // Cluster list for multi-cluster scheduling
+  const [clusters, setClusters] = useState<ClusterEntry[]>([]);
+
   // Create team form state
   const [newTeam, setNewTeam] = useState<CreateTeamRequest>({
     name: '',
     display_name: '',
+    cluster_name: 'default',
   });
 
-  // Fetch teams on mount
+  // Fetch teams and clusters on mount
   useEffect(() => {
     loadTeams();
+    clustersApi.list().then(setClusters).catch(() => setClusters([]));
   }, []);
 
   const loadTeams = async () => {
@@ -77,7 +84,7 @@ const TeamManagement: React.FC = () => {
       setCreating(true);
       await teamsApi.create(newTeam);
       setShowCreateModal(false);
-      setNewTeam({ name: '', display_name: '' });
+      setNewTeam({ name: '', display_name: '', cluster_name: 'default' });
       await loadTeams();
     } catch (err) {
       const message =
@@ -325,6 +332,9 @@ Type "DELETE" to confirm:`;
                 <th className="p-5 text-[10px] font-bold uppercase tracking-widest text-text-secondary">
                   Namespace
                 </th>
+                <th className="p-5 text-[10px] font-bold uppercase tracking-widest text-text-secondary hidden lg:table-cell">
+                  Cluster
+                </th>
                 <th className="p-5 text-[10px] font-bold uppercase tracking-widest text-text-secondary">
                   Status
                 </th>
@@ -339,7 +349,7 @@ Type "DELETE" to confirm:`;
             <tbody className="divide-y divide-border-dark font-body text-sm">
               {loading && (
                 <tr>
-                  <td colSpan={5} className="p-8 text-center text-text-secondary">
+                  <td colSpan={6} className="p-8 text-center text-text-secondary">
                     <div className="flex items-center justify-center gap-2">
                       <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary"></div>
                       <span>Loading teams...</span>
@@ -349,7 +359,7 @@ Type "DELETE" to confirm:`;
               )}
               {error && (
                 <tr>
-                  <td colSpan={5} className="p-8 text-center text-red-500">
+                  <td colSpan={6} className="p-8 text-center text-red-500">
                     <span className="material-symbols-outlined text-[24px] block mb-2">
                       error_outline
                     </span>
@@ -359,7 +369,7 @@ Type "DELETE" to confirm:`;
               )}
               {!loading && !error && filteredTeams.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="p-8 text-center text-text-secondary">
+                  <td colSpan={6} className="p-8 text-center text-text-secondary">
                     <span className="material-symbols-outlined text-[48px] block mb-2 opacity-30">
                       groups
                     </span>
@@ -389,6 +399,14 @@ Type "DELETE" to confirm:`;
                       <code className="px-2 py-1 bg-background-dark rounded text-xs text-primary">
                         {team.namespace}
                       </code>
+                    </td>
+                    <td className="p-5 hidden lg:table-cell">
+                      <span className="inline-flex items-center gap-1.5 text-xs text-text-secondary">
+                        <span className="material-symbols-outlined text-[14px]">hub</span>
+                        <code className="font-mono">
+                          {team.cluster_name || 'default'}
+                        </code>
+                      </span>
                     </td>
                     <td className="p-5">
                       <span
@@ -497,6 +515,26 @@ Type "DELETE" to confirm:`;
                   className="w-full h-11 px-4 bg-background-dark border border-border-dark rounded-xl focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all text-sm"
                   required
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-text-secondary mb-2">
+                  Target Cluster
+                </label>
+                <select
+                  value={newTeam.cluster_name || 'default'}
+                  onChange={(e) => setNewTeam({ ...newTeam, cluster_name: e.target.value })}
+                  className="w-full h-11 px-4 bg-background-dark border border-border-dark rounded-xl focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all text-sm appearance-none cursor-pointer"
+                >
+                  {clusters.map((c) => (
+                    <option key={c.name} value={c.name}>
+                      {c.name === 'default' ? 'Hub Cluster (default)' : `${c.name} — ${c.status}`}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-text-secondary mt-1">
+                  Agent workloads for this team will be scheduled to this cluster.
+                </p>
               </div>
 
               <div className="flex gap-3 pt-4">

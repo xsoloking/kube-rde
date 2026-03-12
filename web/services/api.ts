@@ -508,9 +508,15 @@ export interface Team {
   name: string;
   display_name: string;
   namespace: string;
+  cluster_name: string;
   status: 'active' | 'suspended';
   created_at: string;
   updated_at: string;
+}
+
+export interface ClusterEntry {
+  name: string;
+  status: string;
 }
 
 export interface TeamQuota {
@@ -541,6 +547,7 @@ export interface TeamQuotaItem {
 export interface CreateTeamRequest {
   name: string;
   display_name: string;
+  cluster_name?: string;
 }
 
 export interface UpdateTeamRequest {
@@ -577,4 +584,9 @@ export const teamsApi = {
       .then((res) => res.quotas),
   updateQuota: (id: number, request: UpdateTeamQuotaRequest) =>
     api.put<{ message: string }>(`/api/admin/teams/${id}/quota`, request),
+};
+
+// Clusters API — returns Karmada member clusters (admin only)
+export const clustersApi = {
+  list: () => api.get<ClusterEntry[]>('/api/clusters'),
 };
