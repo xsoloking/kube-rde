@@ -42,6 +42,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	"tailscale.com/derp"
 	"tailscale.com/derp/derphttp"
 	"tailscale.com/types/key"
@@ -66,6 +67,13 @@ var (
 	k8sClientset  kubernetes.Interface
 	dynamicClient dynamic.Interface
 	frpAgentGVR   = schema.GroupVersionResource{Group: "kuberde.io", Version: "v1beta1", Resource: "rdeagents"}
+
+	// karmadaClient is a dynamic client pointed at the Karmada API server.
+	// Nil when KARMADA_APISERVER_URL and KARMADA_KUBECONFIG are both unset (single-cluster mode).
+	karmadaClient dynamic.Interface
+
+	// karmadaEnabled is true when the Karmada multi-cluster mode is active.
+	karmadaEnabled bool
 
 	scaleUpMutex      sync.Mutex              // Prevent concurrent scale-up attempts for same agent
 	scaleUpInProgress = make(map[string]bool) // Track which agents are being scaled up
@@ -108,6 +116,25 @@ var (
 	// This pod's IP address (injected by Kubernetes downward API via POD_IP env var).
 	// Used to register agent sessions and to distinguish local vs remote pods.
 	podIP = "127.0.0.1"
+)
+
+// Karmada policy resource GVRs
+var (
+	propagationPolicyGVR = schema.GroupVersionResource{
+		Group:    "policy.karmada.io",
+		Version:  "v1alpha1",
+		Resource: "propagationpolicies",
+	}
+	overridePolicyGVR = schema.GroupVersionResource{
+		Group:    "policy.karmada.io",
+		Version:  "v1alpha1",
+		Resource: "overridepolicies",
+	}
+	clusterPropagationPolicyGVR = schema.GroupVersionResource{
+		Group:    "policy.karmada.io",
+		Version:  "v1alpha1",
+		Resource: "clusterpropagationpolicies",
+	}
 )
 
 type contextKey string
@@ -159,6 +186,34 @@ func init() {
 			kuberdeNamespace = strings.TrimSpace(string(nsBytes))
 		}
 		// Otherwise, use default "kuberde"
+	}
+
+	// Initialize Karmada client (optional, backward-compatible)
+	karmadaAPIServerURL := os.Getenv("KARMADA_APISERVER_URL")
+	karmadaKubeconfig := os.Getenv("KARMADA_KUBECONFIG")
+
+	if karmadaAPIServerURL != "" || karmadaKubeconfig != "" {
+		var karmadaCfg *rest.Config
+		var karmadaErr error
+		if karmadaKubeconfig != "" {
+			karmadaCfg, karmadaErr = clientcmd.BuildConfigFromFlags("", karmadaKubeconfig)
+		} else {
+			karmadaCfg = &rest.Config{Host: karmadaAPIServerURL}
+			karmadaErr = nil
+		}
+		if karmadaErr != nil {
+			log.Printf("WARNING: Failed to build Karmada config: %v — running in single-cluster mode", karmadaErr)
+		} else {
+			karmadaClient, karmadaErr = dynamic.NewForConfig(karmadaCfg)
+			if karmadaErr != nil {
+				log.Printf("WARNING: Failed to create Karmada dynamic client: %v", karmadaErr)
+			} else {
+				karmadaEnabled = true
+				log.Printf("✓ Karmada multi-cluster mode enabled (apiserver: %s)", karmadaAPIServerURL)
+			}
+		}
+	} else {
+		log.Printf("ℹ  KARMADA_APISERVER_URL not set — running in single-cluster mode")
 	}
 }
 
