@@ -144,6 +144,18 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: status.podIP
+        # Karmada multi-cluster (optional — leave value empty for single-cluster mode)
+        - name: KARMADA_KUBECONFIG
+          value: "/etc/karmada/kubeconfig"
+        volumeMounts:
+        - name: karmada-kubeconfig
+          mountPath: /etc/karmada
+          readOnly: true
+      volumes:
+      - name: karmada-kubeconfig
+        secret:
+          secretName: karmada-kubeconfig
+          optional: true   # Server starts normally even if secret doesn't exist (single-cluster mode)
 ---
 apiVersion: v1
 kind: Service
