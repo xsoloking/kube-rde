@@ -173,7 +173,7 @@ type Team struct {
 	Name        string    `gorm:"uniqueIndex;not null" json:"name"`      // e.g., "ai-team"
 	DisplayName string    `json:"display_name"`                          // e.g., "AI Research Team"
 	Namespace   string    `gorm:"uniqueIndex;not null" json:"namespace"` // e.g., "kuberde-ai-team"
-	ClusterName string    `gorm:"not null;default:'default'" json:"cluster_name"` // Karmada member cluster; "default" = hub cluster local scheduling
+	ClusterName string    `gorm:"not null" json:"cluster_name"` // Karmada member cluster; "default" = hub cluster local scheduling
 	Status      string    `gorm:"default:'active'" json:"status"`        // active, suspended
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`

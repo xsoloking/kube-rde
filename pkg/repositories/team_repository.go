@@ -27,7 +27,11 @@ func NewTeamRepository(db *gorm.DB) TeamRepository {
 }
 
 func (r *teamRepository) Create(team *models.Team) error {
-	return r.db.Create(team).Error
+	// Select("*") forces GORM to include all fields in the INSERT statement,
+	// preventing it from silently skipping fields that have a gorm:"default" tag
+	// (e.g. ClusterName) when their value happens to match the Go zero value or
+	// GORM decides to rely on the database DEFAULT.
+	return r.db.Select("*").Create(team).Error
 }
 
 func (r *teamRepository) GetByID(id uint) (*models.Team, error) {
