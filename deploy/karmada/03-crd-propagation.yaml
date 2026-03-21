@@ -18,8 +18,5 @@ spec:
   placement:
     clusterAffinity:
       labelSelector:
-        matchExpressions:
-        - key: kuberde.io/member
-          operator: In
-          values:
-          - "true"
+        matchLabels:
+          kuberde.io/member: "true"
