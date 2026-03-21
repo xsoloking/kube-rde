@@ -7667,7 +7667,11 @@ func handleListClusters(w http.ResponseWriter, r *http.Request) {
 	}
 	clusterList, err := karmadaClient.Resource(clusterGVR).List(context.Background(), metav1.ListOptions{})
 	if err != nil {
-		http.Error(w, "Failed to list clusters: "+err.Error(), http.StatusInternalServerError)
+		// Karmada API is enabled but unreachable — degrade gracefully so the
+		// UI always gets a valid response and the user can still create teams.
+		log.Printf("WARNING: Failed to list Karmada clusters (karmadaEnabled=true but API unreachable): %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]clusterEntry{{Name: "default", Status: "Ready"}})
 		return
 	}
 
@@ -8494,6 +8498,8 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 	if req.ClusterName == "" {
 		req.ClusterName = "default"
 	}
+
+	log.Printf("handleCreateTeam: name=%s cluster_name=%q karmadaEnabled=%v", req.Name, req.ClusterName, karmadaEnabled)
 
 	// Generate namespace name
 	namespace := fmt.Sprintf("kuberde-%s", req.Name)
