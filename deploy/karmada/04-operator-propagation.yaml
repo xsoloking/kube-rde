@@ -62,9 +62,7 @@ spec:
     plaintext:
     # Override KUBERDE_SERVER_API (index 0) to Hub public URL
     - path: "/spec/template/spec/containers/0/env/0/value"
-      op: replace
       value: "https://frp.byai.uk"
     # Override KEYCLOAK_URL (index 1) to Keycloak public URL
     - path: "/spec/template/spec/containers/0/env/1/value"
-      op: replace
       value: "https://sso.byai.uk"
