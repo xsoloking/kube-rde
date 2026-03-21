@@ -603,6 +603,19 @@ Type "DELETE" to confirm:`;
 
               <div>
                 <label className="block text-sm font-bold text-text-secondary mb-2">
+                  Target Cluster
+                </label>
+                <div className="w-full h-11 px-4 bg-background-dark border border-border-dark rounded-xl text-sm opacity-60 cursor-not-allowed flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[16px] text-text-secondary">hub</span>
+                  <span className="font-mono">{editingTeam.cluster_name || 'default'}</span>
+                </div>
+                <p className="text-xs text-text-secondary mt-1">
+                  Cluster cannot be changed after team creation.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-text-secondary mb-2">
                   Display Name
                 </label>
                 <input
