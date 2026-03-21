@@ -11,6 +11,23 @@
 # Member cluster operators MUST connect to Hub via public internet addresses,
 # not internal cluster DNS (which is only resolvable within the Hub cluster).
 ---
+# Propagate the kuberde namespace to all member clusters first.
+# Deployment and ServiceAccount require the namespace to exist before they can be created.
+apiVersion: policy.karmada.io/v1alpha1
+kind: ClusterPropagationPolicy
+metadata:
+  name: kuberde-namespace-propagation
+spec:
+  resourceSelectors:
+  - apiVersion: v1
+    kind: Namespace
+    name: kuberde
+  placement:
+    clusterAffinity:
+      labelSelector:
+        matchLabels:
+          kuberde.io/member: "true"
+---
 apiVersion: policy.karmada.io/v1alpha1
 kind: ClusterPropagationPolicy
 metadata:
