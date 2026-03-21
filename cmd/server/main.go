@@ -196,7 +196,12 @@ func init() {
 		var karmadaCfg *rest.Config
 		var karmadaErr error
 		if karmadaKubeconfig != "" {
-			karmadaCfg, karmadaErr = clientcmd.BuildConfigFromFlags("", karmadaKubeconfig)
+			if _, statErr := os.Stat(karmadaKubeconfig); os.IsNotExist(statErr) {
+				log.Printf("WARNING: KARMADA_KUBECONFIG file %s does not exist — create Secret 'karmada-kubeconfig' in namespace kuberde and restart server to enable multi-cluster mode", karmadaKubeconfig)
+				karmadaErr = statErr
+			} else {
+				karmadaCfg, karmadaErr = clientcmd.BuildConfigFromFlags("", karmadaKubeconfig)
+			}
 		} else {
 			karmadaCfg = &rest.Config{Host: karmadaAPIServerURL}
 			karmadaErr = nil

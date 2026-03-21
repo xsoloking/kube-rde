@@ -526,9 +526,10 @@ Type "DELETE" to confirm:`;
                   onChange={(e) => setNewTeam({ ...newTeam, cluster_name: e.target.value })}
                   className="w-full h-11 px-4 bg-background-dark border border-border-dark rounded-xl focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all text-sm appearance-none cursor-pointer"
                 >
-                  {clusters.map((c) => (
+                  <option value="default">Hub Cluster (default)</option>
+                  {clusters.filter((c) => c.name !== 'default').map((c) => (
                     <option key={c.name} value={c.name}>
-                      {c.name === 'default' ? 'Hub Cluster (default)' : `${c.name} — ${c.status}`}
+                      {c.name} — {c.status}
                     </option>
                   ))}
                 </select>
