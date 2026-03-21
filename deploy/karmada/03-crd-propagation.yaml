@@ -17,8 +17,9 @@ spec:
     name: rdeagents.kuberde.io
   placement:
     clusterAffinity:
-      matchExpressions:
-      - key: kuberde.io/member
-        operator: In
-        values:
-        - "true"
+      labelSelector:
+        matchExpressions:
+        - key: kuberde.io/member
+          operator: In
+          values:
+          - "true"
