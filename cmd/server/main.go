@@ -8472,6 +8472,7 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name        string `json:"name"`
 		DisplayName string `json:"display_name"`
+		ClusterName string `json:"cluster_name"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -8484,6 +8485,11 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Default to hub cluster if not specified
+	if req.ClusterName == "" {
+		req.ClusterName = "default"
+	}
+
 	// Generate namespace name
 	namespace := fmt.Sprintf("kuberde-%s", req.Name)
 
@@ -8491,6 +8497,7 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 		Name:        req.Name,
 		DisplayName: req.DisplayName,
 		Namespace:   namespace,
+		ClusterName: req.ClusterName,
 		Status:      "active",
 	}
 
