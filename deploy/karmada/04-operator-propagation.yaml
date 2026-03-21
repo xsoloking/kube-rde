@@ -3,6 +3,13 @@
 # and creating Deployments/PVCs. No code changes to Operator required.
 #
 # Apply with: kubectl apply -f deploy/karmada/04-operator-propagation.yaml --kubeconfig=/tmp/karmada.kubeconfig
+#
+# IMPORTANT: Before applying, set the correct public URLs:
+#   KUBERDE_SERVER_API  → Hub public URL, e.g. https://frp.byai.uk
+#   KEYCLOAK_URL        → Keycloak public URL, e.g. https://sso.byai.uk
+#
+# Member cluster operators MUST connect to Hub via public internet addresses,
+# not internal cluster DNS (which is only resolvable within the Hub cluster).
 ---
 apiVersion: policy.karmada.io/v1alpha1
 kind: ClusterPropagationPolicy
@@ -29,3 +36,35 @@ spec:
       labelSelector:
         matchLabels:
           kuberde.io/member: "true"
+---
+# Override Hub-internal addresses with public internet URLs for member clusters.
+# Member cluster Operators cannot resolve kuberde-server.kuberde.svc.cluster.local
+# or keycloak.kuberde.svc.cluster.local — they must use the Hub's public endpoints.
+#
+# env array indices in deploy/k8s/04-operator.yaml:
+#   0: KUBERDE_SERVER_API
+#   1: KEYCLOAK_URL
+apiVersion: policy.karmada.io/v1alpha1
+kind: ClusterOverridePolicy
+metadata:
+  name: kuberde-operator-public-urls
+spec:
+  resourceSelectors:
+  - apiVersion: apps/v1
+    kind: Deployment
+    name: kuberde-operator
+    namespace: kuberde
+  targetCluster:
+    labelSelector:
+      matchLabels:
+        kuberde.io/member: "true"
+  overriders:
+    plaintext:
+    # Override KUBERDE_SERVER_API (index 0) to Hub public URL
+    - path: "/spec/template/spec/containers/0/env/0/value"
+      op: replace
+      value: "https://frp.byai.uk"
+    # Override KEYCLOAK_URL (index 1) to Keycloak public URL
+    - path: "/spec/template/spec/containers/0/env/1/value"
+      op: replace
+      value: "https://sso.byai.uk"
