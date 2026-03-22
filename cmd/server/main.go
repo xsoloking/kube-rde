@@ -1964,6 +1964,38 @@ func getAgentNamespaceAndName(agentID string) (namespace, crName string) {
 	return namespace, crName
 }
 
+// karmadaOrHubDynamic returns the Karmada dynamic client for member-cluster teams,
+// and the hub dynamic client for default (hub-local) teams.
+// Use this wherever an RDEAgent CR is created, read, updated or deleted so that
+// the operation targets the correct API server (Karmada vs. hub k8s).
+func karmadaOrHubDynamic(team *models.Team) dynamic.Interface {
+	if karmadaEnabled && team != nil && team.ClusterName != "" && team.ClusterName != "default" {
+		return karmadaClient
+	}
+	return dynamicClient
+}
+
+// getTeamForWorkspace loads the team that owns a workspace, or nil on failure.
+func getTeamForWorkspace(workspace *models.Workspace) *models.Team {
+	if workspace == nil || workspace.TeamID == nil || teamRepo == nil {
+		return nil
+	}
+	team, _ := teamRepo.GetByID(*workspace.TeamID)
+	return team
+}
+
+// getTeamForService loads the team that owns a service (via workspace), or nil.
+func getTeamForService(service *models.Service) *models.Team {
+	if service == nil {
+		return nil
+	}
+	workspace, err := dbpkg.WorkspaceRepo().FindByID(service.WorkspaceID)
+	if err != nil || workspace == nil {
+		return nil
+	}
+	return getTeamForWorkspace(workspace)
+}
+
 // getNamespaceForService returns the team namespace for a service, or kuberdeNamespace if no team
 func getNamespaceForService(service *models.Service) string {
 	if service == nil {
@@ -3386,6 +3418,7 @@ func handleDeleteUser(w http.ResponseWriter, r *http.Request, userID string) {
 		for _, workspace := range workspaces {
 			// Get team namespace for this workspace
 			workspaceNamespace := getNamespaceForWorkspace(&workspace)
+			wsTeam := getTeamForWorkspace(&workspace)
 
 			// Get all services in this workspace to delete their RDEAgent CRs
 			serviceRepo := dbpkg.ServiceRepo()
@@ -3397,7 +3430,7 @@ func handleDeleteUser(w http.ResponseWriter, r *http.Request, userID string) {
 			// Delete RDEAgent CRs for each service
 			for _, service := range services {
 				if service.AgentID != "" && dynamicClient != nil {
-					err := dynamicClient.Resource(frpAgentGVR).Namespace(workspaceNamespace).Delete(
+					err := karmadaOrHubDynamic(wsTeam).Resource(frpAgentGVR).Namespace(workspaceNamespace).Delete(
 						ctx,
 						service.AgentID,
 						metav1.DeleteOptions{},
@@ -4052,6 +4085,7 @@ func handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 		// Get team namespace for this workspace
 		workspaceNamespace := getNamespaceForWorkspace(&workspaces[i])
+		wsTeamStatus := getTeamForWorkspace(&workspaces[i])
 
 		for j := range workspaces[i].Services {
 			service := &workspaces[i].Services[j]
@@ -4062,13 +4096,13 @@ func handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
 				// Try new naming convention first (empty team for backwards compatibility)
 				derivedAgentID := generateAgentName(service.CreatedByID, user.Username, service.WorkspaceID, workspaces[i].Name, service.Name)
 				if dynamicClient != nil {
-					_, err := dynamicClient.Resource(frpAgentGVR).Namespace(workspaceNamespace).Get(context.TODO(), derivedAgentID, metav1.GetOptions{})
+					_, err := karmadaOrHubDynamic(wsTeamStatus).Resource(frpAgentGVR).Namespace(workspaceNamespace).Get(context.TODO(), derivedAgentID, metav1.GetOptions{})
 					if err == nil {
 						agentID = derivedAgentID
 					} else {
 						// Try old naming convention as fallback
 						oldAgentID := fmt.Sprintf("kuberde-%s-%s-%s", service.CreatedByID, service.WorkspaceID, service.Name)
-						_, err := dynamicClient.Resource(frpAgentGVR).Namespace(workspaceNamespace).Get(context.TODO(), oldAgentID, metav1.GetOptions{})
+						_, err := karmadaOrHubDynamic(wsTeamStatus).Resource(frpAgentGVR).Namespace(workspaceNamespace).Get(context.TODO(), oldAgentID, metav1.GetOptions{})
 						if err == nil {
 							agentID = oldAgentID
 						}
@@ -4083,7 +4117,7 @@ func handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 			// Try to get CR status from Kubernetes
 			if dynamicClient != nil {
-				cr, err := dynamicClient.Resource(frpAgentGVR).Namespace(workspaceNamespace).Get(context.TODO(), agentID, metav1.GetOptions{})
+				cr, err := karmadaOrHubDynamic(wsTeamStatus).Resource(frpAgentGVR).Namespace(workspaceNamespace).Get(context.TODO(), agentID, metav1.GetOptions{})
 				if err == nil {
 					// Extract status from CR
 					if status, found, err := unstructured.NestedMap(cr.Object, "status"); found && err == nil {
@@ -4309,7 +4343,7 @@ func handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 			teamNamespace = team.Namespace
 		}
 		go func() {
-			if err := createWorkspacePVC(context.Background(), user.Username, workspace, teamNamespace); err != nil {
+			if err := createWorkspacePVC(context.Background(), user.Username, workspace, teamNamespace, team); err != nil {
 				log.Printf("WARNING: Failed to create PVC %s: %v", pvcName, err)
 				// Don't fail the API call, PVC creation is async
 			} else {
@@ -4412,6 +4446,7 @@ func handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	// Get team namespace for this workspace
 	targetNamespace := getNamespaceForWorkspace(workspace)
+	wsTeam := getTeamForWorkspace(workspace)
 
 	// Delete all agents (RDEAgent CRs) associated with services in this workspace
 	services, err := dbpkg.ServiceRepo().FindByWorkspaceID(workspaceID, 1000, 0)
@@ -4419,7 +4454,7 @@ func handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		for _, service := range services {
 			if service.AgentID != "" {
 				log.Printf("Deleting agent CR %s for service %s in namespace %s", service.AgentID, service.ID, targetNamespace)
-				err := dynamicClient.Resource(frpAgentGVR).Namespace(targetNamespace).Delete(context.TODO(), service.AgentID, metav1.DeleteOptions{})
+				err := karmadaOrHubDynamic(wsTeam).Resource(frpAgentGVR).Namespace(targetNamespace).Delete(context.TODO(), service.AgentID, metav1.DeleteOptions{})
 				if err != nil {
 					log.Printf("WARNING: Failed to delete agent CR %s: %v", service.AgentID, err)
 				}
@@ -4436,14 +4471,27 @@ func handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Delete PVC if it exists
-	if workspace.PVCName != "" && k8sClientset != nil {
-		pvcClient := k8sClientset.CoreV1().PersistentVolumeClaims(targetNamespace)
-		if err := pvcClient.Delete(context.Background(), workspace.PVCName, metav1.DeleteOptions{}); err != nil {
-			log.Printf("WARNING: Failed to delete PVC %s: %v", workspace.PVCName, err)
-			// Continue with workspace deletion even if PVC deletion fails
-		} else {
-			log.Printf("✓ Deleted PVC %s", workspace.PVCName)
+	// Delete PVC
+	if workspace.PVCName != "" {
+		// For Karmada member-cluster teams: delete from Karmada API + PropagationPolicy
+		if karmadaEnabled && wsTeam != nil && wsTeam.ClusterName != "" && wsTeam.ClusterName != "default" {
+			pvcGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "persistentvolumeclaims"}
+			if err := karmadaClient.Resource(pvcGVR).Namespace(targetNamespace).Delete(context.Background(), workspace.PVCName, metav1.DeleteOptions{}); err != nil && !strings.Contains(err.Error(), "not found") {
+				log.Printf("WARNING: Failed to delete PVC %s from Karmada API: %v", workspace.PVCName, err)
+			} else {
+				log.Printf("✓ Deleted PVC %s from Karmada API", workspace.PVCName)
+			}
+			ppName := "pvc-" + workspace.PVCName
+			if ppErr := karmadaClient.Resource(propagationPolicyGVR).Namespace(targetNamespace).Delete(context.Background(), ppName, metav1.DeleteOptions{}); ppErr != nil && !strings.Contains(ppErr.Error(), "not found") {
+				log.Printf("WARNING: Failed to delete PVC PropagationPolicy %s: %v", ppName, ppErr)
+			}
+		} else if k8sClientset != nil {
+			pvcClient := k8sClientset.CoreV1().PersistentVolumeClaims(targetNamespace)
+			if err := pvcClient.Delete(context.Background(), workspace.PVCName, metav1.DeleteOptions{}); err != nil {
+				log.Printf("WARNING: Failed to delete PVC %s: %v", workspace.PVCName, err)
+			} else {
+				log.Printf("✓ Deleted PVC %s", workspace.PVCName)
+			}
 		}
 	}
 
@@ -4561,6 +4609,7 @@ func handleListWorkspaceServices(w http.ResponseWriter, r *http.Request) {
 
 	// Get team namespace for this workspace
 	targetNamespace := getNamespaceForWorkspace(workspace)
+	wsTeamDetail := getTeamForWorkspace(workspace)
 
 	// Update service status from CR status (real-time)
 	for i := range services {
@@ -4573,7 +4622,7 @@ func handleListWorkspaceServices(w http.ResponseWriter, r *http.Request) {
 
 			// Check if CR exists with this name
 			if dynamicClient != nil {
-				_, err := dynamicClient.Resource(frpAgentGVR).Namespace(targetNamespace).Get(context.TODO(), derivedAgentID, metav1.GetOptions{})
+				_, err := karmadaOrHubDynamic(wsTeamDetail).Resource(frpAgentGVR).Namespace(targetNamespace).Get(context.TODO(), derivedAgentID, metav1.GetOptions{})
 				if err == nil {
 					// CR exists! Update the service record
 					services[i].AgentID = derivedAgentID
@@ -4586,7 +4635,7 @@ func handleListWorkspaceServices(w http.ResponseWriter, r *http.Request) {
 				} else {
 					// Try old naming convention as fallback: kuberde-{userID}-{workspaceID}-{serviceName}
 					oldAgentID := fmt.Sprintf("kuberde-%s-%s-%s", services[i].CreatedByID, services[i].WorkspaceID, services[i].Name)
-					_, err := dynamicClient.Resource(frpAgentGVR).Namespace(targetNamespace).Get(context.TODO(), oldAgentID, metav1.GetOptions{})
+					_, err := karmadaOrHubDynamic(wsTeamDetail).Resource(frpAgentGVR).Namespace(targetNamespace).Get(context.TODO(), oldAgentID, metav1.GetOptions{})
 					if err == nil {
 						services[i].AgentID = oldAgentID
 						if updateErr := dbpkg.ServiceRepo().Update(&services[i]); updateErr != nil {
@@ -4607,7 +4656,7 @@ func handleListWorkspaceServices(w http.ResponseWriter, r *http.Request) {
 
 		// Try to get CR status from Kubernetes
 		if dynamicClient != nil {
-			cr, err := dynamicClient.Resource(frpAgentGVR).Namespace(targetNamespace).Get(context.TODO(), agentID, metav1.GetOptions{})
+			cr, err := karmadaOrHubDynamic(wsTeamDetail).Resource(frpAgentGVR).Namespace(targetNamespace).Get(context.TODO(), agentID, metav1.GetOptions{})
 			if err == nil {
 				// Extract status from CR
 				if status, found, err := unstructured.NestedMap(cr.Object, "status"); found && err == nil {
@@ -5387,7 +5436,8 @@ func handleDeleteService(w http.ResponseWriter, r *http.Request) {
 	if service.AgentID != "" && dynamicClient != nil {
 		ctx := context.Background()
 		targetNamespace := getNamespaceForService(service)
-		err := dynamicClient.Resource(frpAgentGVR).Namespace(targetNamespace).Delete(ctx, service.AgentID, metav1.DeleteOptions{})
+		svcTeam := getTeamForService(service)
+		err := karmadaOrHubDynamic(svcTeam).Resource(frpAgentGVR).Namespace(targetNamespace).Delete(ctx, service.AgentID, metav1.DeleteOptions{})
 		if err != nil {
 			// Log error but don't fail the deletion if CR doesn't exist
 			if !strings.Contains(err.Error(), "not found") {
@@ -6041,6 +6091,7 @@ func handleGetService(w http.ResponseWriter, r *http.Request, serviceID string) 
 	// Update service status from CR status (real-time)
 	agentID := service.AgentID
 	targetNamespace := getNamespaceForService(service)
+	svcTeamDetail := getTeamForService(service)
 	log.Printf("[handleGetService] Service ID: %s, AgentID: %s, Namespace: %s", service.ID, agentID, targetNamespace)
 
 	// If AgentID is empty but service has a template, try to derive and update it
@@ -6056,7 +6107,7 @@ func handleGetService(w http.ResponseWriter, r *http.Request, serviceID string) 
 
 			// Check if CR exists with this name
 			if dynamicClient != nil {
-				_, err := dynamicClient.Resource(frpAgentGVR).Namespace(targetNamespace).Get(context.TODO(), derivedAgentID, metav1.GetOptions{})
+				_, err := karmadaOrHubDynamic(svcTeamDetail).Resource(frpAgentGVR).Namespace(targetNamespace).Get(context.TODO(), derivedAgentID, metav1.GetOptions{})
 				if err == nil {
 					// CR exists! Update the service record
 					service.AgentID = derivedAgentID
@@ -6070,7 +6121,7 @@ func handleGetService(w http.ResponseWriter, r *http.Request, serviceID string) 
 					// Try old naming convention as fallback: kuberde-{userID}-{workspaceID}-{serviceName}
 					oldAgentID := fmt.Sprintf("kuberde-%s-%s-%s", service.CreatedByID, service.WorkspaceID, service.Name)
 					log.Printf("[handleGetService] New convention failed, trying old convention: %s", oldAgentID)
-					_, err := dynamicClient.Resource(frpAgentGVR).Namespace(targetNamespace).Get(context.TODO(), oldAgentID, metav1.GetOptions{})
+					_, err := karmadaOrHubDynamic(svcTeamDetail).Resource(frpAgentGVR).Namespace(targetNamespace).Get(context.TODO(), oldAgentID, metav1.GetOptions{})
 					if err == nil {
 						service.AgentID = oldAgentID
 						if updateErr := dbpkg.ServiceRepo().Update(service); updateErr != nil {
@@ -6091,7 +6142,7 @@ func handleGetService(w http.ResponseWriter, r *http.Request, serviceID string) 
 
 	if agentID != "" && dynamicClient != nil {
 		// Try to get CR status from Kubernetes
-		cr, err := dynamicClient.Resource(frpAgentGVR).Namespace(targetNamespace).Get(context.TODO(), agentID, metav1.GetOptions{})
+		cr, err := karmadaOrHubDynamic(svcTeamDetail).Resource(frpAgentGVR).Namespace(targetNamespace).Get(context.TODO(), agentID, metav1.GetOptions{})
 		if err == nil {
 			log.Printf("[handleGetService] CR found for AgentID: %s", agentID)
 			// Extract status from CR
@@ -6575,11 +6626,11 @@ func handleImportTemplates(w http.ResponseWriter, r *http.Request) {
 }
 
 // createWorkspacePVC creates a PersistentVolumeClaim for a workspace
-func createWorkspacePVC(ctx context.Context, userName string, workspace *models.Workspace, namespace string) error {
-	if k8sClientset == nil {
-		return fmt.Errorf("kubernetes client not available")
-	}
-
+// createWorkspacePVC creates the PVC for a workspace.
+// team is optional but must be supplied for correct multi-cluster routing:
+//   - hub team (ClusterName=="default" or karmada disabled): PVC via k8sClientset
+//   - member-cluster team: PVC written to Karmada API server + PropagationPolicy
+func createWorkspacePVC(ctx context.Context, userName string, workspace *models.Workspace, namespace string, team *models.Team) error {
 	// Use team namespace if provided, otherwise fall back to kuberdeNamespace
 	targetNamespace := namespace
 	if targetNamespace == "" {
@@ -6592,7 +6643,7 @@ func createWorkspacePVC(ctx context.Context, userName string, workspace *models.
 		return fmt.Errorf("PVCName not set on workspace")
 	}
 
-	// Parse storage size (e.g., "50Gi" -> "50Gi")
+	// Parse storage size
 	storageSize := workspace.StorageSize
 	if storageSize == "" {
 		storageSize = "50Gi"
@@ -6604,8 +6655,16 @@ func createWorkspacePVC(ctx context.Context, userName string, workspace *models.
 		storageClass = "standard"
 	}
 
-	// Determine access mode based on storage class
-	// local-path only supports ReadWriteOnce, other storage classes use ReadWriteMany
+	// Member-cluster team: create PVC in Karmada API server so Karmada propagates it.
+	if karmadaEnabled && team != nil && team.ClusterName != "" && team.ClusterName != "default" {
+		return createWorkspacePVCKarmada(ctx, pvcName, storageSize, storageClass, targetNamespace, userName, workspace.Name, team)
+	}
+
+	// Hub team: create PVC directly via k8sClientset.
+	if k8sClientset == nil {
+		return fmt.Errorf("kubernetes client not available")
+	}
+
 	var accessMode corev1.PersistentVolumeAccessMode
 	if storageClass == "local-path" {
 		accessMode = corev1.ReadWriteOnce
@@ -6627,9 +6686,7 @@ func createWorkspacePVC(ctx context.Context, userName string, workspace *models.
 			},
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: []corev1.PersistentVolumeAccessMode{
-				accessMode, // Dynamic based on storage class
-			},
+			AccessModes:      []corev1.PersistentVolumeAccessMode{accessMode},
 			StorageClassName: &storageClass,
 			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
@@ -6639,15 +6696,92 @@ func createWorkspacePVC(ctx context.Context, userName string, workspace *models.
 		},
 	}
 
-	pvcClient := k8sClientset.CoreV1().PersistentVolumeClaims(targetNamespace)
-
-	_, err := pvcClient.Create(ctx, pvc, metav1.CreateOptions{})
+	_, err := k8sClientset.CoreV1().PersistentVolumeClaims(targetNamespace).
+		Create(ctx, pvc, metav1.CreateOptions{})
 	if err != nil {
 		log.Printf("Failed to create PVC %s: %v", pvcName, err)
 		return fmt.Errorf("failed to create PVC: %w", err)
 	}
 
 	log.Printf("✓ Created PVC %s in namespace %s", pvcName, targetNamespace)
+	return nil
+}
+
+// createWorkspacePVCKarmada writes a PVC into the Karmada API server and creates a
+// PropagationPolicy so Karmada pushes it to the team's member cluster.
+func createWorkspacePVCKarmada(ctx context.Context, pvcName, storageSize, storageClass, namespace, userName, workspaceName string, team *models.Team) error {
+	pvcGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "persistentvolumeclaims"}
+
+	// local-path only supports ReadWriteOnce; other classes use ReadWriteMany
+	accessMode := "ReadWriteMany"
+	if storageClass == "local-path" {
+		accessMode = "ReadWriteOnce"
+	}
+
+	pvcObj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "PersistentVolumeClaim",
+			"metadata": map[string]interface{}{
+				"name":      pvcName,
+				"namespace": namespace,
+				"labels": map[string]interface{}{
+					"app":       "kuberde",
+					"type":      "workspace",
+					"user":      userName,
+					"workspace": workspaceName,
+				},
+			},
+			"spec": map[string]interface{}{
+				"accessModes":      []interface{}{accessMode},
+				"storageClassName": storageClass,
+				"resources": map[string]interface{}{
+					"requests": map[string]interface{}{
+						"storage": storageSize,
+					},
+				},
+			},
+		},
+	}
+
+	_, err := karmadaClient.Resource(pvcGVR).Namespace(namespace).
+		Create(ctx, pvcObj, metav1.CreateOptions{})
+	if err != nil && !strings.Contains(err.Error(), "already exists") {
+		return fmt.Errorf("create PVC %s in Karmada API: %w", pvcName, err)
+	}
+
+	// PropagationPolicy to push this PVC to the member cluster.
+	ppName := "pvc-" + pvcName
+	pp := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "policy.karmada.io/v1alpha1",
+			"kind":       "PropagationPolicy",
+			"metadata": map[string]interface{}{
+				"name":      ppName,
+				"namespace": namespace,
+			},
+			"spec": map[string]interface{}{
+				"resourceSelectors": []interface{}{
+					map[string]interface{}{
+						"apiVersion": "v1",
+						"kind":       "PersistentVolumeClaim",
+						"name":       pvcName,
+					},
+				},
+				"placement": map[string]interface{}{
+					"clusterAffinity": map[string]interface{}{
+						"clusterNames": []interface{}{team.ClusterName},
+					},
+				},
+			},
+		},
+	}
+	if _, ppErr := karmadaClient.Resource(propagationPolicyGVR).Namespace(namespace).
+		Create(ctx, pp, metav1.CreateOptions{}); ppErr != nil && !strings.Contains(ppErr.Error(), "already exists") {
+		log.Printf("WARNING: Failed to create PropagationPolicy for PVC %s: %v", pvcName, ppErr)
+	}
+
+	log.Printf("✓ Created PVC %s in Karmada API namespace %s → cluster %s", pvcName, namespace, team.ClusterName)
 	return nil
 }
 
@@ -6924,8 +7058,9 @@ func createRDEAgentFromTemplate(ctx context.Context, service *models.Service, te
 		},
 	}
 
-	// Create the RDEAgent CR
-	_, err := dynamicClient.Resource(frpAgentGVR).Namespace(targetNamespace).Create(ctx, agent, metav1.CreateOptions{})
+	// Create the RDEAgent CR — use Karmada API for member-cluster teams so
+	// the PropagationPolicy below can pick it up and push it to the right cluster.
+	_, err := karmadaOrHubDynamic(team).Resource(frpAgentGVR).Namespace(targetNamespace).Create(ctx, agent, metav1.CreateOptions{})
 	if err != nil {
 		log.Printf("Failed to create RDEAgent CR %s: %v", crName, err)
 		return "", fmt.Errorf("failed to create RDEAgent CR: %w", err)
@@ -6996,9 +7131,11 @@ func updateRDEAgentSpec(ctx context.Context, service *models.Service) error {
 
 	// Get the team namespace for this service
 	targetNamespace := getNamespaceForService(service)
+	team := getTeamForService(service)
+	apiClient := karmadaOrHubDynamic(team)
 
 	// Get existing CR
-	agentCR, err := dynamicClient.Resource(frpAgentGVR).Namespace(targetNamespace).Get(ctx, service.AgentID, metav1.GetOptions{})
+	agentCR, err := apiClient.Resource(frpAgentGVR).Namespace(targetNamespace).Get(ctx, service.AgentID, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get RDEAgent CR: %w", err)
 	}
@@ -7114,7 +7251,7 @@ func updateRDEAgentSpec(ctx context.Context, service *models.Service) error {
 
 	// Apply updates
 	agentCR.Object["spec"] = spec
-	_, err = dynamicClient.Resource(frpAgentGVR).Namespace(targetNamespace).Update(ctx, agentCR, metav1.UpdateOptions{})
+	_, err = apiClient.Resource(frpAgentGVR).Namespace(targetNamespace).Update(ctx, agentCR, metav1.UpdateOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to update K8S resource: %w", err)
 	}
@@ -7211,6 +7348,7 @@ func handleAdminListWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 		// Get team namespace for this workspace
 		workspaceNamespace := getNamespaceForWorkspace(&workspaces[i])
+		wsTeamStatus := getTeamForWorkspace(&workspaces[i])
 
 		for j := range workspaces[i].Services {
 			service := &workspaces[i].Services[j]
@@ -7221,13 +7359,13 @@ func handleAdminListWorkspaces(w http.ResponseWriter, r *http.Request) {
 				// Try new naming convention first (empty team for backwards compatibility)
 				derivedAgentID := generateAgentName(service.CreatedByID, user.Username, service.WorkspaceID, workspaces[i].Name, service.Name)
 				if dynamicClient != nil {
-					_, err := dynamicClient.Resource(frpAgentGVR).Namespace(workspaceNamespace).Get(context.TODO(), derivedAgentID, metav1.GetOptions{})
+					_, err := karmadaOrHubDynamic(wsTeamStatus).Resource(frpAgentGVR).Namespace(workspaceNamespace).Get(context.TODO(), derivedAgentID, metav1.GetOptions{})
 					if err == nil {
 						agentID = derivedAgentID
 					} else {
 						// Try old naming convention as fallback
 						oldAgentID := fmt.Sprintf("kuberde-%s-%s-%s", service.CreatedByID, service.WorkspaceID, service.Name)
-						_, err := dynamicClient.Resource(frpAgentGVR).Namespace(workspaceNamespace).Get(context.TODO(), oldAgentID, metav1.GetOptions{})
+						_, err := karmadaOrHubDynamic(wsTeamStatus).Resource(frpAgentGVR).Namespace(workspaceNamespace).Get(context.TODO(), oldAgentID, metav1.GetOptions{})
 						if err == nil {
 							agentID = oldAgentID
 						}
@@ -7242,7 +7380,7 @@ func handleAdminListWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 			// Try to get CR status from Kubernetes
 			if dynamicClient != nil {
-				cr, err := dynamicClient.Resource(frpAgentGVR).Namespace(workspaceNamespace).Get(context.TODO(), agentID, metav1.GetOptions{})
+				cr, err := karmadaOrHubDynamic(wsTeamStatus).Resource(frpAgentGVR).Namespace(workspaceNamespace).Get(context.TODO(), agentID, metav1.GetOptions{})
 				if err == nil {
 					// Extract status from CR
 					if status, found, err := unstructured.NestedMap(cr.Object, "status"); found && err == nil {
@@ -7917,6 +8055,7 @@ func handleDeleteTeam(w http.ResponseWriter, r *http.Request, teamID uint) {
 // deleteWorkspaceWithResources deletes a workspace and all its K8s resources
 func deleteWorkspaceWithResources(workspace *models.Workspace, namespace string) error {
 	ctx := context.Background()
+	wsTeam := getTeamForWorkspace(workspace)
 
 	// Delete all agents (RDEAgent CRs) associated with services in this workspace
 	services, err := dbpkg.ServiceRepo().FindByWorkspaceID(workspace.ID, 1000, 0)
@@ -7924,7 +8063,7 @@ func deleteWorkspaceWithResources(workspace *models.Workspace, namespace string)
 		for _, service := range services {
 			if service.AgentID != "" {
 				log.Printf("Deleting agent CR %s for service %s in namespace %s", service.AgentID, service.ID, namespace)
-				err := dynamicClient.Resource(frpAgentGVR).Namespace(namespace).Delete(ctx, service.AgentID, metav1.DeleteOptions{})
+				err := karmadaOrHubDynamic(wsTeam).Resource(frpAgentGVR).Namespace(namespace).Delete(ctx, service.AgentID, metav1.DeleteOptions{})
 				if err != nil && !strings.Contains(err.Error(), "not found") {
 					log.Printf("Warning: Failed to delete agent CR %s: %v", service.AgentID, err)
 				}
@@ -7941,15 +8080,29 @@ func deleteWorkspaceWithResources(workspace *models.Workspace, namespace string)
 		}
 	}
 
-	// Delete PVC if it exists
-	if workspace.PVCName != "" && k8sClientset != nil {
-		pvcClient := k8sClientset.CoreV1().PersistentVolumeClaims(namespace)
-		if err := pvcClient.Delete(ctx, workspace.PVCName, metav1.DeleteOptions{}); err != nil {
-			if !strings.Contains(err.Error(), "not found") {
-				log.Printf("Warning: Failed to delete PVC %s: %v", workspace.PVCName, err)
+	// Delete PVC
+	if workspace.PVCName != "" {
+		if karmadaEnabled && wsTeam != nil && wsTeam.ClusterName != "" && wsTeam.ClusterName != "default" {
+			// Karmada team: delete from Karmada API + PropagationPolicy
+			pvcGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "persistentvolumeclaims"}
+			if err := karmadaClient.Resource(pvcGVR).Namespace(namespace).Delete(ctx, workspace.PVCName, metav1.DeleteOptions{}); err != nil && !strings.Contains(err.Error(), "not found") {
+				log.Printf("Warning: Failed to delete PVC %s from Karmada API: %v", workspace.PVCName, err)
+			} else {
+				log.Printf("✓ Deleted PVC %s from Karmada API", workspace.PVCName)
 			}
-		} else {
-			log.Printf("✓ Deleted PVC %s", workspace.PVCName)
+			ppName := "pvc-" + workspace.PVCName
+			if ppErr := karmadaClient.Resource(propagationPolicyGVR).Namespace(namespace).Delete(ctx, ppName, metav1.DeleteOptions{}); ppErr != nil && !strings.Contains(ppErr.Error(), "not found") {
+				log.Printf("WARNING: Failed to delete PVC PropagationPolicy %s: %v", ppName, ppErr)
+			}
+		} else if k8sClientset != nil {
+			pvcClient := k8sClientset.CoreV1().PersistentVolumeClaims(namespace)
+			if err := pvcClient.Delete(ctx, workspace.PVCName, metav1.DeleteOptions{}); err != nil {
+				if !strings.Contains(err.Error(), "not found") {
+					log.Printf("Warning: Failed to delete PVC %s: %v", workspace.PVCName, err)
+				}
+			} else {
+				log.Printf("✓ Deleted PVC %s", workspace.PVCName)
+			}
 		}
 	}
 
@@ -7962,13 +8115,53 @@ func deleteWorkspaceWithResources(workspace *models.Workspace, namespace string)
 	return nil
 }
 
-// deleteTeamNamespace force deletes the Kubernetes namespace for a team
+// deleteTeamNamespace force deletes the Kubernetes namespace for a team.
+// For Karmada member-cluster teams it also cleans up resources in the Karmada API server.
 func deleteTeamNamespace(team *models.Team) error {
 	if k8sClientset == nil {
 		return fmt.Errorf("kubernetes client not initialized")
 	}
 
 	ctx := context.Background()
+
+	isKarmadaTeam := karmadaEnabled && team.ClusterName != "" && team.ClusterName != "default"
+
+	if isKarmadaTeam {
+		// --- Karmada member-cluster team ---
+		// 1. Delete all RDEAgent CRs from Karmada API (PropagationPolicy deletion cascades)
+		if karmadaClient != nil {
+			_ = karmadaClient.Resource(frpAgentGVR).Namespace(team.Namespace).DeleteCollection(
+				ctx, metav1.DeleteOptions{}, metav1.ListOptions{},
+			)
+			// 2. Delete all PropagationPolicies in the namespace (agent + PVC)
+			_ = karmadaClient.Resource(propagationPolicyGVR).Namespace(team.Namespace).DeleteCollection(
+				ctx, metav1.DeleteOptions{}, metav1.ListOptions{},
+			)
+			// 3. Delete auth secret from Karmada API
+			authSecretName := os.Getenv("KUBERDE_AGENT_AUTH_SECRET")
+			if authSecretName == "" {
+				authSecretName = "kuberde-agents-auth"
+			}
+			secretGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
+			_ = karmadaClient.Resource(secretGVR).Namespace(team.Namespace).Delete(
+				ctx, authSecretName, metav1.DeleteOptions{},
+			)
+			// 4. Delete namespace from Karmada API
+			nsGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "namespaces"}
+			if err := karmadaClient.Resource(nsGVR).Delete(ctx, team.Namespace, metav1.DeleteOptions{}); err != nil && !strings.Contains(err.Error(), "not found") {
+				log.Printf("WARNING: Failed to delete namespace %s from Karmada API: %v", team.Namespace, err)
+			}
+			// 5. Delete ClusterPropagationPolicy for the namespace
+			clusterPropPolicyGVR := schema.GroupVersionResource{
+				Group: "policy.karmada.io", Version: "v1alpha1", Resource: "clusterpropagationpolicies",
+			}
+			_ = karmadaClient.Resource(clusterPropPolicyGVR).Delete(ctx, "team-"+team.Name+"-ns", metav1.DeleteOptions{})
+		}
+		log.Printf("Cleaned up Karmada API resources for team %s (cluster: %s)", team.Name, team.ClusterName)
+		return nil
+	}
+
+	// --- Hub-local team ---
 
 	// Check if namespace exists
 	_, err := k8sClientset.CoreV1().Namespaces().Get(ctx, team.Namespace, metav1.GetOptions{})
@@ -7982,15 +8175,8 @@ func deleteTeamNamespace(team *models.Team) error {
 
 	// Delete all RDEAgents in the namespace first
 	if dynamicClient != nil {
-		rdeAgentGVR := schema.GroupVersionResource{
-			Group:    "kuberde.io",
-			Version:  "v1beta1",
-			Resource: "rdeagents",
-		}
-		err := dynamicClient.Resource(rdeAgentGVR).Namespace(team.Namespace).DeleteCollection(
-			ctx,
-			metav1.DeleteOptions{},
-			metav1.ListOptions{},
+		err := dynamicClient.Resource(frpAgentGVR).Namespace(team.Namespace).DeleteCollection(
+			ctx, metav1.DeleteOptions{}, metav1.ListOptions{},
 		)
 		if err != nil && !strings.Contains(err.Error(), "not found") {
 			log.Printf("Warning: Failed to delete RDEAgents in namespace %s: %v", team.Namespace, err)
@@ -8445,6 +8631,16 @@ func applyTeamResourceQuotaNew(team *models.Team, quota *models.TeamQuota) error
 		return nil
 	}
 
+	// For member-cluster teams, create/update the ResourceQuota in the Karmada API
+	// server so that Karmada propagates it to the member cluster.
+	// For hub teams (default), use k8sClientset directly.
+	if karmadaEnabled && team.ClusterName != "" && team.ClusterName != "default" {
+		return applyTeamResourceQuotaKarmada(team, hard)
+	}
+
+	if k8sClientset == nil {
+		return fmt.Errorf("kubernetes client not initialized")
+	}
 	rq := &corev1.ResourceQuota{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "team-quota",
@@ -8460,6 +8656,83 @@ func applyTeamResourceQuotaNew(team *models.Team, quota *models.TeamQuota) error
 		_, err = k8sClientset.CoreV1().ResourceQuotas(team.Namespace).Update(context.Background(), rq, metav1.UpdateOptions{})
 	}
 	return err
+}
+
+// applyTeamResourceQuotaKarmada creates/updates a ResourceQuota in the Karmada API
+// server and ensures a PropagationPolicy exists to push it to the team's member cluster.
+func applyTeamResourceQuotaKarmada(team *models.Team, hard corev1.ResourceList) error {
+	rqGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "resourcequotas"}
+
+	// Build the hard-limits map as strings for the Unstructured representation.
+	hardMap := make(map[string]interface{}, len(hard))
+	for k, v := range hard {
+		hardMap[string(k)] = v.String()
+	}
+
+	rqObj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ResourceQuota",
+			"metadata": map[string]interface{}{
+				"name":      "team-quota",
+				"namespace": team.Namespace,
+			},
+			"spec": map[string]interface{}{
+				"hard": hardMap,
+			},
+		},
+	}
+
+	_, err := karmadaClient.Resource(rqGVR).Namespace(team.Namespace).
+		Create(context.Background(), rqObj, metav1.CreateOptions{})
+	if err != nil && strings.Contains(err.Error(), "already exists") {
+		// Fetch existing, update resourceVersion, then update.
+		existing, getErr := karmadaClient.Resource(rqGVR).Namespace(team.Namespace).
+			Get(context.Background(), "team-quota", metav1.GetOptions{})
+		if getErr == nil {
+			rqObj.SetResourceVersion(existing.GetResourceVersion())
+		}
+		_, err = karmadaClient.Resource(rqGVR).Namespace(team.Namespace).
+			Update(context.Background(), rqObj, metav1.UpdateOptions{})
+	}
+	if err != nil {
+		return fmt.Errorf("upsert ResourceQuota in Karmada API: %w", err)
+	}
+
+	// Ensure a PropagationPolicy routes the ResourceQuota to the member cluster.
+	pp := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "policy.karmada.io/v1alpha1",
+			"kind":       "PropagationPolicy",
+			"metadata": map[string]interface{}{
+				"name":      "team-quota-pp",
+				"namespace": team.Namespace,
+			},
+			"spec": map[string]interface{}{
+				"resourceSelectors": []interface{}{
+					map[string]interface{}{
+						"apiVersion": "v1",
+						"kind":       "ResourceQuota",
+						"name":       "team-quota",
+					},
+				},
+				"placement": map[string]interface{}{
+					"clusterAffinity": map[string]interface{}{
+						"clusterNames": []interface{}{team.ClusterName},
+					},
+				},
+			},
+		},
+	}
+	_, ppErr := karmadaClient.Resource(propagationPolicyGVR).Namespace(team.Namespace).
+		Create(context.Background(), pp, metav1.CreateOptions{})
+	if ppErr != nil && !strings.Contains(ppErr.Error(), "already exists") {
+		log.Printf("WARNING: Failed to create PropagationPolicy for ResourceQuota: %v", ppErr)
+	}
+
+	log.Printf("✓ ResourceQuota team-quota upserted in Karmada API namespace %s → cluster %s",
+		team.Namespace, team.ClusterName)
+	return nil
 }
 
 // handleListTeams returns all teams
