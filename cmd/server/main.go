@@ -8639,15 +8639,83 @@ func createTeamNamespace(team *models.Team) error {
 	return nil
 }
 
-// propagateTeamNamespaceToCluster creates a Karmada ClusterPropagationPolicy to propagate
-// the team's namespace and auth secret to the specified member cluster.
+// propagateTeamNamespaceToCluster creates the team namespace (and auth secret) in the
+// Karmada API server and then creates a ClusterPropagationPolicy to push them to the
+// target member cluster.
+//
+// KEY DESIGN NOTE: Karmada only propagates resources that exist in its own etcd
+// (the Karmada API server). Resources created directly on the hub k8s cluster via
+// k8sClientset are invisible to Karmada — even if a ClusterPropagationPolicy selects
+// them by name, the policy will match nothing and no propagation occurs.
+// Therefore we must write every resource we want propagated into the Karmada API
+// server first, then let the ClusterPropagationPolicy distribute them.
 func propagateTeamNamespaceToCluster(team *models.Team) error {
 	policyName := "team-" + team.Name + "-ns"
-	agentAuthSecret := os.Getenv("KUBERDE_AGENT_AUTH_SECRET")
-	if agentAuthSecret == "" {
-		agentAuthSecret = "kuberde-agents-auth"
+	agentAuthSecretName := os.Getenv("KUBERDE_AGENT_AUTH_SECRET")
+	if agentAuthSecretName == "" {
+		agentAuthSecretName = "kuberde-agents-auth"
 	}
 
+	nsGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "namespaces"}
+	secretGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
+
+	// Step 1: Create the namespace in the Karmada API server.
+	nsObj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Namespace",
+			"metadata": map[string]interface{}{
+				"name": team.Namespace,
+				"labels": map[string]interface{}{
+					"kuberde.io/team":      team.Name,
+					"kuberde.io/component": "team-namespace",
+				},
+			},
+		},
+	}
+	if _, err := karmadaClient.Resource(nsGVR).Create(context.Background(), nsObj, metav1.CreateOptions{}); err != nil &&
+		!strings.Contains(err.Error(), "already exists") {
+		return fmt.Errorf("create namespace %s in Karmada API: %w", team.Namespace, err)
+	}
+	log.Printf("✓ Created namespace %s in Karmada API server", team.Namespace)
+
+	// Step 2: Copy the agent auth secret into the Karmada API server so it can be
+	// propagated alongside the namespace.  Read the source secret from the hub cluster.
+	if k8sClientset != nil && agentAuthSecretName != "" {
+		hubSecret, err := k8sClientset.CoreV1().Secrets(kuberdeNamespace).Get(
+			context.Background(), agentAuthSecretName, metav1.GetOptions{})
+		if err == nil {
+			// Secret.Data values are []byte (decoded); re-encode to base64 strings
+			// for the Kubernetes JSON API "data" field format.
+			secretData := make(map[string]interface{}, len(hubSecret.Data))
+			for k, v := range hubSecret.Data {
+				secretData[k] = base64.StdEncoding.EncodeToString(v)
+			}
+			secretObj := &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"apiVersion": "v1",
+					"kind":       "Secret",
+					"metadata": map[string]interface{}{
+						"name":      agentAuthSecretName,
+						"namespace": team.Namespace,
+					},
+					"type": string(hubSecret.Type),
+					"data": secretData,
+				},
+			}
+			if _, serr := karmadaClient.Resource(secretGVR).Namespace(team.Namespace).
+				Create(context.Background(), secretObj, metav1.CreateOptions{}); serr != nil &&
+				!strings.Contains(serr.Error(), "already exists") {
+				log.Printf("WARNING: Failed to copy auth secret to Karmada API namespace %s: %v", team.Namespace, serr)
+			} else {
+				log.Printf("✓ Copied auth secret %s to Karmada API namespace %s", agentAuthSecretName, team.Namespace)
+			}
+		} else {
+			log.Printf("WARNING: Failed to read auth secret %s from hub namespace %s: %v", agentAuthSecretName, kuberdeNamespace, err)
+		}
+	}
+
+	// Step 3: Create ClusterPropagationPolicy to push namespace + secret to the member cluster.
 	resourceSelectors := []interface{}{
 		map[string]interface{}{
 			"apiVersion": "v1",
@@ -8655,11 +8723,11 @@ func propagateTeamNamespaceToCluster(team *models.Team) error {
 			"name":       team.Namespace,
 		},
 	}
-	if agentAuthSecret != "" {
+	if agentAuthSecretName != "" {
 		resourceSelectors = append(resourceSelectors, map[string]interface{}{
 			"apiVersion": "v1",
 			"kind":       "Secret",
-			"name":       agentAuthSecret,
+			"name":       agentAuthSecretName,
 			"namespace":  team.Namespace,
 		})
 	}
@@ -8685,12 +8753,13 @@ func propagateTeamNamespaceToCluster(team *models.Team) error {
 		},
 	}
 
-	_, err := karmadaClient.Resource(clusterPropagationPolicyGVR).
-		Create(context.Background(), policy, metav1.CreateOptions{})
-	if err != nil && !strings.Contains(err.Error(), "already exists") {
+	if _, err := karmadaClient.Resource(clusterPropagationPolicyGVR).
+		Create(context.Background(), policy, metav1.CreateOptions{}); err != nil &&
+		!strings.Contains(err.Error(), "already exists") {
 		return fmt.Errorf("create ClusterPropagationPolicy %s: %w", policyName, err)
 	}
-	log.Printf("✓ Propagated namespace %s to cluster %s", team.Namespace, team.ClusterName)
+	log.Printf("✓ ClusterPropagationPolicy %s created — namespace %s will be propagated to cluster %s",
+		policyName, team.Namespace, team.ClusterName)
 	return nil
 }
 
