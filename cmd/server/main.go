@@ -2178,6 +2178,93 @@ func ensureTeamCRPropagationPolicy(ctx context.Context, team *models.Team) error
 	return nil
 }
 
+// ensureWorkspaceInfra creates or updates a KubeRDEWorkspace CR in the appropriate
+// API server (Karmada for member-cluster teams, hub k8s for others).
+// The Operator reconciles the CR and provisions the PVC in the target namespace/cluster.
+func ensureWorkspaceInfra(workspace *models.Workspace, team *models.Team) error {
+	// Workspace CRs live in the team's target namespace (not kuberde ns).
+	targetNamespace := kuberdeNamespace
+	if team != nil && team.Namespace != "" {
+		targetNamespace = team.Namespace
+	}
+
+	apiClient, err := getTeamAPIClient(team)
+	if err != nil {
+		return err
+	}
+
+	storageSize := workspace.StorageSize
+	if storageSize == "" {
+		storageSize = "50Gi"
+	}
+	storageClass := workspace.StorageClass
+	if storageClass == "" {
+		storageClass = "standard"
+	}
+
+	cr := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "kuberde.io/v1beta1",
+		"kind":       "KubeRDEWorkspace",
+		"metadata": map[string]interface{}{
+			"name":      workspace.PVCName, // Use PVC name as CR name (unique per workspace)
+			"namespace": targetNamespace,
+			"labels": map[string]interface{}{
+				"kuberde.io/workspace-id": workspace.ID,
+				"kuberde.io/owner-id":     workspace.OwnerID,
+			},
+		},
+		"spec": map[string]interface{}{
+			"workspaceID":  workspace.ID,
+			"ownerID":      workspace.OwnerID,
+			"storageSize":  storageSize,
+			"storageClass": storageClass,
+		},
+	}}
+
+	ctx := context.Background()
+	existing, getErr := apiClient.Resource(kubeRDEWorkspaceGVR).Namespace(targetNamespace).
+		Get(ctx, workspace.PVCName, metav1.GetOptions{})
+	if getErr != nil {
+		if _, createErr := apiClient.Resource(kubeRDEWorkspaceGVR).Namespace(targetNamespace).
+			Create(ctx, cr, metav1.CreateOptions{}); createErr != nil {
+			return fmt.Errorf("create KubeRDEWorkspace CR for %s: %w", workspace.ID, createErr)
+		}
+		log.Printf("✓ Created KubeRDEWorkspace CR %s in namespace %s", workspace.PVCName, targetNamespace)
+	} else {
+		existing.Object["spec"] = cr.Object["spec"]
+		if _, updateErr := apiClient.Resource(kubeRDEWorkspaceGVR).Namespace(targetNamespace).
+			Update(ctx, existing, metav1.UpdateOptions{}); updateErr != nil {
+			return fmt.Errorf("update KubeRDEWorkspace CR for %s: %w", workspace.ID, updateErr)
+		}
+		log.Printf("✓ Updated KubeRDEWorkspace CR %s", workspace.PVCName)
+	}
+	return nil
+}
+
+// deleteWorkspaceCR deletes the KubeRDEWorkspace CR; the Operator's finalizer
+// cleans up the PVC and any other cluster resources.
+func deleteWorkspaceCR(workspace *models.Workspace, team *models.Team) {
+	if workspace.PVCName == "" {
+		return
+	}
+	targetNamespace := kuberdeNamespace
+	if team != nil && team.Namespace != "" {
+		targetNamespace = team.Namespace
+	}
+	apiClient, err := getTeamAPIClient(team)
+	if err != nil {
+		log.Printf("WARNING: deleteWorkspaceCR: cannot get API client for workspace %s: %v", workspace.ID, err)
+		return
+	}
+	delErr := apiClient.Resource(kubeRDEWorkspaceGVR).Namespace(targetNamespace).
+		Delete(context.Background(), workspace.PVCName, metav1.DeleteOptions{})
+	if delErr != nil && !strings.Contains(delErr.Error(), "not found") {
+		log.Printf("WARNING: Failed to delete KubeRDEWorkspace CR %s: %v", workspace.PVCName, delErr)
+	} else {
+		log.Printf("✓ Deleted KubeRDEWorkspace CR %s (Operator will clean up PVC)", workspace.PVCName)
+	}
+}
+
 // getNamespaceForService returns the team namespace for a service, or kuberdeNamespace if no team
 func getNamespaceForService(service *models.Service) string {
 	if service == nil {
@@ -4517,26 +4604,17 @@ func handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	pvcName := generateWorkspacePVCName(userID, user.Username, workspace.ID, workspace.Name)
 	workspace.PVCName = pvcName
 
-	// Create PVC in Kubernetes if client is available
-	if k8sClientset != nil {
-		// Get team namespace for PVC creation
-		teamNamespace := ""
-		if team != nil {
-			teamNamespace = team.Namespace
-		}
-		go func() {
-			if err := createWorkspacePVC(context.Background(), user.Username, workspace, teamNamespace, team); err != nil {
-				log.Printf("WARNING: Failed to create PVC %s: %v", pvcName, err)
-				// Don't fail the API call, PVC creation is async
-			} else {
-				log.Printf("✓ Created PVC %s for workspace %s", pvcName, workspace.ID)
-				// Update workspace record with PVC name
-				if err := dbpkg.WorkspaceRepo().Update(workspace); err != nil {
-					log.Printf("WARNING: Failed to update workspace with PVC name: %v", err)
-				}
+	// Async: write KubeRDEWorkspace CR → Operator provisions PVC in target namespace/cluster.
+	go func() {
+		if err := ensureWorkspaceInfra(workspace, team); err != nil {
+			log.Printf("WARNING: Failed to create KubeRDEWorkspace CR for %s: %v", pvcName, err)
+		} else {
+			// Update workspace record with PVC name (already set above; persist to DB)
+			if err := dbpkg.WorkspaceRepo().Update(workspace); err != nil {
+				log.Printf("WARNING: Failed to update workspace with PVC name: %v", err)
 			}
-		}()
-	}
+		}
+	}()
 
 	// Log audit entry
 	auditRepo := dbpkg.AuditLogRepo()
@@ -4653,29 +4731,8 @@ func handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Delete PVC
-	if workspace.PVCName != "" {
-		// For Karmada member-cluster teams: delete from Karmada API + PropagationPolicy
-		if karmadaEnabled && wsTeam != nil && wsTeam.ClusterName != "" && wsTeam.ClusterName != "default" {
-			pvcGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "persistentvolumeclaims"}
-			if err := karmadaClient.Resource(pvcGVR).Namespace(targetNamespace).Delete(context.Background(), workspace.PVCName, metav1.DeleteOptions{}); err != nil && !strings.Contains(err.Error(), "not found") {
-				log.Printf("WARNING: Failed to delete PVC %s from Karmada API: %v", workspace.PVCName, err)
-			} else {
-				log.Printf("✓ Deleted PVC %s from Karmada API", workspace.PVCName)
-			}
-			ppName := "pvc-" + workspace.PVCName
-			if ppErr := karmadaClient.Resource(propagationPolicyGVR).Namespace(targetNamespace).Delete(context.Background(), ppName, metav1.DeleteOptions{}); ppErr != nil && !strings.Contains(ppErr.Error(), "not found") {
-				log.Printf("WARNING: Failed to delete PVC PropagationPolicy %s: %v", ppName, ppErr)
-			}
-		} else if k8sClientset != nil {
-			pvcClient := k8sClientset.CoreV1().PersistentVolumeClaims(targetNamespace)
-			if err := pvcClient.Delete(context.Background(), workspace.PVCName, metav1.DeleteOptions{}); err != nil {
-				log.Printf("WARNING: Failed to delete PVC %s: %v", workspace.PVCName, err)
-			} else {
-				log.Printf("✓ Deleted PVC %s", workspace.PVCName)
-			}
-		}
-	}
+	// Delete KubeRDEWorkspace CR → Operator finalizer cleans up PVC.
+	deleteWorkspaceCR(workspace, wsTeam)
 
 	// Delete workspace from database
 	if err := dbpkg.WorkspaceRepo().Delete(workspaceID); err != nil {
@@ -6807,166 +6864,6 @@ func handleImportTemplates(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// createWorkspacePVC creates a PersistentVolumeClaim for a workspace
-// createWorkspacePVC creates the PVC for a workspace.
-// team is optional but must be supplied for correct multi-cluster routing:
-//   - hub team (ClusterName=="default" or karmada disabled): PVC via k8sClientset
-//   - member-cluster team: PVC written to Karmada API server + PropagationPolicy
-func createWorkspacePVC(ctx context.Context, userName string, workspace *models.Workspace, namespace string, team *models.Team) error {
-	// Use team namespace if provided, otherwise fall back to kuberdeNamespace
-	targetNamespace := namespace
-	if targetNamespace == "" {
-		targetNamespace = kuberdeNamespace
-	}
-
-	// Use the PVCName already set on the workspace
-	pvcName := workspace.PVCName
-	if pvcName == "" {
-		return fmt.Errorf("PVCName not set on workspace")
-	}
-
-	// Parse storage size
-	storageSize := workspace.StorageSize
-	if storageSize == "" {
-		storageSize = "50Gi"
-	}
-
-	// Get StorageClass from workspace
-	storageClass := workspace.StorageClass
-	if storageClass == "" {
-		storageClass = "standard"
-	}
-
-	// Member-cluster team: create PVC in Karmada API server so Karmada propagates it.
-	if karmadaEnabled && team != nil && team.ClusterName != "" && team.ClusterName != "default" {
-		return createWorkspacePVCKarmada(ctx, pvcName, storageSize, storageClass, targetNamespace, userName, workspace.Name, team)
-	}
-
-	// Hub team: create PVC directly via k8sClientset.
-	if k8sClientset == nil {
-		return fmt.Errorf("kubernetes client not available")
-	}
-
-	var accessMode corev1.PersistentVolumeAccessMode
-	if storageClass == "local-path" {
-		accessMode = corev1.ReadWriteOnce
-		log.Printf("Using ReadWriteOnce access mode for local-path storage class")
-	} else {
-		accessMode = corev1.ReadWriteMany
-		log.Printf("Using ReadWriteMany access mode for storage class: %s", storageClass)
-	}
-
-	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      pvcName,
-			Namespace: targetNamespace,
-			Labels: map[string]string{
-				"app":       "kuberde",
-				"type":      "workspace",
-				"user":      userName,
-				"workspace": workspace.Name,
-			},
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes:      []corev1.PersistentVolumeAccessMode{accessMode},
-			StorageClassName: &storageClass,
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: mustParse(storageSize),
-				},
-			},
-		},
-	}
-
-	_, err := k8sClientset.CoreV1().PersistentVolumeClaims(targetNamespace).
-		Create(ctx, pvc, metav1.CreateOptions{})
-	if err != nil {
-		log.Printf("Failed to create PVC %s: %v", pvcName, err)
-		return fmt.Errorf("failed to create PVC: %w", err)
-	}
-
-	log.Printf("✓ Created PVC %s in namespace %s", pvcName, targetNamespace)
-	return nil
-}
-
-// createWorkspacePVCKarmada writes a PVC into the Karmada API server and creates a
-// PropagationPolicy so Karmada pushes it to the team's member cluster.
-func createWorkspacePVCKarmada(ctx context.Context, pvcName, storageSize, storageClass, namespace, userName, workspaceName string, team *models.Team) error {
-	pvcGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "persistentvolumeclaims"}
-
-	// local-path only supports ReadWriteOnce; other classes use ReadWriteMany
-	accessMode := "ReadWriteMany"
-	if storageClass == "local-path" {
-		accessMode = "ReadWriteOnce"
-	}
-
-	pvcObj := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "v1",
-			"kind":       "PersistentVolumeClaim",
-			"metadata": map[string]interface{}{
-				"name":      pvcName,
-				"namespace": namespace,
-				"labels": map[string]interface{}{
-					"app":       "kuberde",
-					"type":      "workspace",
-					"user":      userName,
-					"workspace": workspaceName,
-				},
-			},
-			"spec": map[string]interface{}{
-				"accessModes":      []interface{}{accessMode},
-				"storageClassName": storageClass,
-				"resources": map[string]interface{}{
-					"requests": map[string]interface{}{
-						"storage": storageSize,
-					},
-				},
-			},
-		},
-	}
-
-	_, err := karmadaClient.Resource(pvcGVR).Namespace(namespace).
-		Create(ctx, pvcObj, metav1.CreateOptions{})
-	if err != nil && !strings.Contains(err.Error(), "already exists") {
-		return fmt.Errorf("create PVC %s in Karmada API: %w", pvcName, err)
-	}
-
-	// PropagationPolicy to push this PVC to the member cluster.
-	ppName := "pvc-" + pvcName
-	pp := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "policy.karmada.io/v1alpha1",
-			"kind":       "PropagationPolicy",
-			"metadata": map[string]interface{}{
-				"name":      ppName,
-				"namespace": namespace,
-			},
-			"spec": map[string]interface{}{
-				"resourceSelectors": []interface{}{
-					map[string]interface{}{
-						"apiVersion": "v1",
-						"kind":       "PersistentVolumeClaim",
-						"name":       pvcName,
-					},
-				},
-				"placement": map[string]interface{}{
-					"clusterAffinity": map[string]interface{}{
-						"clusterNames": []interface{}{team.ClusterName},
-					},
-				},
-			},
-		},
-	}
-	if _, ppErr := karmadaClient.Resource(propagationPolicyGVR).Namespace(namespace).
-		Create(ctx, pp, metav1.CreateOptions{}); ppErr != nil && !strings.Contains(ppErr.Error(), "already exists") {
-		log.Printf("WARNING: Failed to create PropagationPolicy for PVC %s: %v", pvcName, ppErr)
-	}
-
-	log.Printf("✓ Created PVC %s in Karmada API namespace %s → cluster %s", pvcName, namespace, team.ClusterName)
-	return nil
-}
-
 // mustParse parses a Kubernetes resource quantity string
 func mustParse(quantity string) resource.Quantity {
 	q, err := resource.ParseQuantity(quantity)
@@ -8262,31 +8159,8 @@ func deleteWorkspaceWithResources(workspace *models.Workspace, namespace string)
 		}
 	}
 
-	// Delete PVC
-	if workspace.PVCName != "" {
-		if karmadaEnabled && wsTeam != nil && wsTeam.ClusterName != "" && wsTeam.ClusterName != "default" {
-			// Karmada team: delete from Karmada API + PropagationPolicy
-			pvcGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "persistentvolumeclaims"}
-			if err := karmadaClient.Resource(pvcGVR).Namespace(namespace).Delete(ctx, workspace.PVCName, metav1.DeleteOptions{}); err != nil && !strings.Contains(err.Error(), "not found") {
-				log.Printf("Warning: Failed to delete PVC %s from Karmada API: %v", workspace.PVCName, err)
-			} else {
-				log.Printf("✓ Deleted PVC %s from Karmada API", workspace.PVCName)
-			}
-			ppName := "pvc-" + workspace.PVCName
-			if ppErr := karmadaClient.Resource(propagationPolicyGVR).Namespace(namespace).Delete(ctx, ppName, metav1.DeleteOptions{}); ppErr != nil && !strings.Contains(ppErr.Error(), "not found") {
-				log.Printf("WARNING: Failed to delete PVC PropagationPolicy %s: %v", ppName, ppErr)
-			}
-		} else if k8sClientset != nil {
-			pvcClient := k8sClientset.CoreV1().PersistentVolumeClaims(namespace)
-			if err := pvcClient.Delete(ctx, workspace.PVCName, metav1.DeleteOptions{}); err != nil {
-				if !strings.Contains(err.Error(), "not found") {
-					log.Printf("Warning: Failed to delete PVC %s: %v", workspace.PVCName, err)
-				}
-			} else {
-				log.Printf("✓ Deleted PVC %s", workspace.PVCName)
-			}
-		}
-	}
+	// Delete KubeRDEWorkspace CR → Operator finalizer cleans up PVC.
+	deleteWorkspaceCR(workspace, wsTeam)
 
 	// Delete workspace from database (cascades to services)
 	if err := dbpkg.WorkspaceRepo().Delete(workspace.ID); err != nil {
