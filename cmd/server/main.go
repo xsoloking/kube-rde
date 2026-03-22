@@ -9135,6 +9135,41 @@ func sendWireGuardPeerToAgent(agentID, userPublicKey string, userEndpoints []str
 	return json.NewEncoder(ctrlStream).Encode(msg)
 }
 
+// teamInfraReconciler runs in the background and periodically retries teams
+// whose KubeRDETeam CR has not been successfully written (infra_status = pending or error).
+// This ensures that transient API server failures are eventually healed without
+// requiring a server restart or manual intervention.
+func teamInfraReconciler() {
+	ticker := time.NewTicker(2 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		if teamRepo == nil {
+			continue
+		}
+		teams, err := teamRepo.FindByInfraStatuses([]string{"pending", "error"})
+		if err != nil || len(teams) == 0 {
+			continue
+		}
+		for i := range teams {
+			t := &teams[i]
+			// Fetch the quota for this team.
+			var quota *models.TeamQuota
+			if teamQuotaRepo != nil {
+				if q, qErr := teamQuotaRepo.GetByTeamID(t.ID); qErr == nil {
+					quota = q
+				}
+			}
+			if infraErr := ensureTeamInfra(t, quota); infraErr != nil {
+				log.Printf("teamInfraReconciler: ensureTeamInfra failed for team %s: %v", t.Name, infraErr)
+				_ = teamRepo.UpdateInfraStatus(t.ID, "error")
+			} else {
+				_ = teamRepo.UpdateInfraStatus(t.ID, "syncing")
+				log.Printf("teamInfraReconciler: reconciled team %s → syncing", t.Name)
+			}
+		}
+	}
+}
+
 func main() {
 	initAuth()
 
@@ -9161,6 +9196,9 @@ func main() {
 	if err := initAdminTeam(); err != nil {
 		log.Printf("WARNING: Failed to initialize admin team: %v", err)
 	}
+
+	// Background reconciler: retry teams stuck in pending/error infra_status.
+	go teamInfraReconciler()
 
 	http.HandleFunc("/", routeHTTPRequest)
 
