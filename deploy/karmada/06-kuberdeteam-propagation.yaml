@@ -1,0 +1,95 @@
+# Propagate KubeRDETeam and KubeRDEWorkspace CRDs to all member clusters.
+#
+# The Server writes KubeRDETeam CRs into the Karmada API server (namespace: kuberde)
+# with a per-team PropagationPolicy (team-{name}-cr) that routes each CR to its
+# designated cluster. The Operator on the member cluster reconciles the CR:
+#   KubeRDETeam  → Namespace + ResourceQuota + auth Secret
+#   KubeRDEWorkspace → PVC in the team namespace
+#
+# Apply order:
+#   1. kubectl apply -f deploy/k8s/01-crd.yaml --kubeconfig=/tmp/karmada.kubeconfig
+#      (registers KubeRDETeam + KubeRDEWorkspace CRDs in Karmada API server)
+#   2. kubectl apply -f deploy/karmada/06-kuberdeteam-propagation.yaml \
+#        --kubeconfig=/tmp/karmada.kubeconfig
+#
+# Prerequisites:
+#   - Member clusters joined and labeled:
+#       kubectl label cluster <name> kuberde.io/member=true
+#   - Karmada API server already has KubeRDETeam/KubeRDEWorkspace CRDs (step 1 above)
+#   - KubeRDE Operator deployed to all member clusters (see 04-operator-propagation.yaml)
+# ─────────────────────────────────────────────────────────────────────────────
+---
+# Propagate KubeRDETeam CRD so member-cluster Operators can reconcile KubeRDETeam CRs.
+apiVersion: policy.karmada.io/v1alpha1
+kind: ClusterPropagationPolicy
+metadata:
+  name: kuberde-kuberdeteam-crd
+spec:
+  resourceSelectors:
+  - apiVersion: apiextensions.k8s.io/v1
+    kind: CustomResourceDefinition
+    name: kuberdeteams.kuberde.io
+  placement:
+    clusterAffinity:
+      labelSelector:
+        matchLabels:
+          kuberde.io/member: "true"
+---
+# Propagate KubeRDEWorkspace CRD so member-cluster Operators can reconcile workspace PVCs.
+apiVersion: policy.karmada.io/v1alpha1
+kind: ClusterPropagationPolicy
+metadata:
+  name: kuberde-kuberdeworkspace-crd
+spec:
+  resourceSelectors:
+  - apiVersion: apiextensions.k8s.io/v1
+    kind: CustomResourceDefinition
+    name: kuberdeworkspaces.kuberde.io
+  placement:
+    clusterAffinity:
+      labelSelector:
+        matchLabels:
+          kuberde.io/member: "true"
+---
+# Per-team PropagationPolicy template (REFERENCE — do not apply directly).
+#
+# The Server's ensureTeamCRPropagationPolicy() function creates one of these
+# automatically for each team that targets a member cluster:
+#
+#   apiVersion: policy.karmada.io/v1alpha1
+#   kind: PropagationPolicy
+#   metadata:
+#     name: team-<team-name>-cr   # created in kuberde namespace
+#     namespace: kuberde
+#     labels:
+#       kuberde.io/team: <team-name>
+#   spec:
+#     resourceSelectors:
+#     - apiVersion: kuberde.io/v1beta1
+#       kind: KubeRDETeam
+#       name: <team-name>
+#     placement:
+#       clusterAffinity:
+#         clusterNames:
+#         - <cluster-name>         # e.g., "oracle1"
+#     propagateDeps: true          # propagates dependent KubeRDEWorkspace CRs too
+#
+# Manual recovery: if a team's CR is stuck, re-apply its PropagationPolicy:
+#   kubectl apply -f <(cat <<EOF
+#   apiVersion: policy.karmada.io/v1alpha1
+#   kind: PropagationPolicy
+#   metadata:
+#     name: team-<team-name>-cr
+#     namespace: kuberde
+#   spec:
+#     resourceSelectors:
+#     - apiVersion: kuberde.io/v1beta1
+#       kind: KubeRDETeam
+#       name: <team-name>
+#     placement:
+#       clusterAffinity:
+#         clusterNames:
+#         - <cluster-name>
+#     propagateDeps: true
+#   EOF
+#   ) --kubeconfig=/tmp/karmada.kubeconfig
