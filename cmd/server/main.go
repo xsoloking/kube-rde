@@ -1989,6 +1989,25 @@ func karmadaOrHubDynamic(team *models.Team) dynamic.Interface {
 	return dynamicClient
 }
 
+// getCRNamespaceForTeam returns the namespace to use when creating/reading/deleting
+// RDEAgent, KubeRDETeam, and KubeRDEWorkspace CRs via karmadaOrHubDynamic.
+//
+// For Karmada multi-cluster teams the CRs must live in kuberdeNamespace because:
+//   - The Karmada API server only has the "kuberde" namespace in its etcd.
+//   - Team namespaces (e.g. "kuberde-abb") only exist on member clusters.
+//   - PropagationPolicies route the CRs from kuberdeNamespace to the member cluster.
+//
+// For hub-local teams the CRs live directly in team.Namespace on the hub cluster.
+func getCRNamespaceForTeam(team *models.Team) string {
+	if karmadaEnabled && team != nil && team.ClusterName != "" && team.ClusterName != "default" {
+		return kuberdeNamespace
+	}
+	if team != nil && team.Namespace != "" {
+		return team.Namespace
+	}
+	return kuberdeNamespace
+}
+
 // getTeamForWorkspace loads the team that owns a workspace, or nil on failure.
 func getTeamForWorkspace(workspace *models.Workspace) *models.Team {
 	if workspace == nil || workspace.TeamID == nil || teamRepo == nil {
@@ -3727,9 +3746,8 @@ func handleDeleteUser(w http.ResponseWriter, r *http.Request, userID string) {
 
 		// Delete all workspaces (which will cascade delete services via database foreign keys)
 		for _, workspace := range workspaces {
-			// Get team namespace for this workspace
-			workspaceNamespace := getNamespaceForWorkspace(&workspace)
 			wsTeam := getTeamForWorkspace(&workspace)
+			workspaceNamespace := getCRNamespaceForTeam(wsTeam)
 
 			// Get all services in this workspace to delete their RDEAgent CRs
 			serviceRepo := dbpkg.ServiceRepo()
@@ -4394,9 +4412,8 @@ func handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// Get team namespace for this workspace
-		workspaceNamespace := getNamespaceForWorkspace(&workspaces[i])
 		wsTeamStatus := getTeamForWorkspace(&workspaces[i])
+		workspaceNamespace := getCRNamespaceForTeam(wsTeamStatus)
 
 		for j := range workspaces[i].Services {
 			service := &workspaces[i].Services[j]
@@ -4746,9 +4763,8 @@ func handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get team namespace for this workspace
-	targetNamespace := getNamespaceForWorkspace(workspace)
 	wsTeam := getTeamForWorkspace(workspace)
+	targetNamespace := getCRNamespaceForTeam(wsTeam)
 
 	// Delete all agents (RDEAgent CRs) associated with services in this workspace
 	services, err := dbpkg.ServiceRepo().FindByWorkspaceID(workspaceID, 1000, 0)
@@ -4888,9 +4904,8 @@ func handleListWorkspaceServices(w http.ResponseWriter, r *http.Request) {
 		workspace, _ = dbpkg.WorkspaceRepo().FindByID(workspaceID)
 	}
 
-	// Get team namespace for this workspace
-	targetNamespace := getNamespaceForWorkspace(workspace)
 	wsTeamDetail := getTeamForWorkspace(workspace)
+	targetNamespace := getCRNamespaceForTeam(wsTeamDetail)
 
 	// Update service status from CR status (real-time)
 	for i := range services {
@@ -5716,8 +5731,8 @@ func handleDeleteService(w http.ResponseWriter, r *http.Request) {
 	// Delete RDEAgent CR if exists
 	if service.AgentID != "" && dynamicClient != nil {
 		ctx := context.Background()
-		targetNamespace := getNamespaceForService(service)
 		svcTeam := getTeamForService(service)
+		targetNamespace := getCRNamespaceForTeam(svcTeam)
 		err := karmadaOrHubDynamic(svcTeam).Resource(frpAgentGVR).Namespace(targetNamespace).Delete(ctx, service.AgentID, metav1.DeleteOptions{})
 		if err != nil {
 			// Log error but don't fail the deletion if CR doesn't exist
@@ -5729,7 +5744,7 @@ func handleDeleteService(w http.ResponseWriter, r *http.Request) {
 		} else {
 			log.Printf("✓ Deleted RDEAgent CR %s from namespace %s for service %s", service.AgentID, targetNamespace, serviceID)
 		}
-		// Karmada: clean up PropagationPolicy for this agent
+		// Karmada: clean up PropagationPolicy for this agent (PP lives in same namespace as the CR)
 		if karmadaEnabled {
 			ppErr := karmadaClient.Resource(propagationPolicyGVR).
 				Namespace(targetNamespace).
@@ -6371,8 +6386,8 @@ func handleGetService(w http.ResponseWriter, r *http.Request, serviceID string) 
 
 	// Update service status from CR status (real-time)
 	agentID := service.AgentID
-	targetNamespace := getNamespaceForService(service)
 	svcTeamDetail := getTeamForService(service)
+	targetNamespace := getCRNamespaceForTeam(svcTeamDetail)
 	log.Printf("[handleGetService] Service ID: %s, AgentID: %s, Namespace: %s", service.ID, agentID, targetNamespace)
 
 	// If AgentID is empty but service has a template, try to derive and update it
@@ -6925,11 +6940,10 @@ func createRDEAgentFromTemplate(ctx context.Context, service *models.Service, te
 		return "", nil
 	}
 
-	// Get team name and namespace
-	targetNamespace := kuberdeNamespace
-	if team != nil {
-		targetNamespace = team.Namespace
-	}
+	// Get namespace for the RDEAgent CR.
+	// For Karmada teams the CR must be in kuberdeNamespace (Karmada API server);
+	// for hub-local teams it lives in the team namespace on the hub cluster.
+	targetNamespace := getCRNamespaceForTeam(team)
 
 	// Generate CR name using new naming convention with hash
 	// Format: {team}-{userName}-{workspaceName}-{serviceName}-{hash8}
@@ -7250,9 +7264,8 @@ func updateRDEAgentSpec(ctx context.Context, service *models.Service) error {
 		return fmt.Errorf("service has no AgentID")
 	}
 
-	// Get the team namespace for this service
-	targetNamespace := getNamespaceForService(service)
 	team := getTeamForService(service)
+	targetNamespace := getCRNamespaceForTeam(team)
 	apiClient := karmadaOrHubDynamic(team)
 
 	// Get existing CR
@@ -7467,9 +7480,8 @@ func handleAdminListWorkspaces(w http.ResponseWriter, r *http.Request) {
 			user, _ = dbpkg.UserRepo().FindByID(workspaces[i].OwnerID)
 		}
 
-		// Get team namespace for this workspace
-		workspaceNamespace := getNamespaceForWorkspace(&workspaces[i])
 		wsTeamStatus := getTeamForWorkspace(&workspaces[i])
+		workspaceNamespace := getCRNamespaceForTeam(wsTeamStatus)
 
 		for j := range workspaces[i].Services {
 			service := &workspaces[i].Services[j]
@@ -8174,9 +8186,10 @@ func handleDeleteTeam(w http.ResponseWriter, r *http.Request, teamID uint) {
 }
 
 // deleteWorkspaceWithResources deletes a workspace and all its K8s resources
-func deleteWorkspaceWithResources(workspace *models.Workspace, namespace string) error {
+func deleteWorkspaceWithResources(workspace *models.Workspace, _ string) error {
 	ctx := context.Background()
 	wsTeam := getTeamForWorkspace(workspace)
+	namespace := getCRNamespaceForTeam(wsTeam)
 
 	// Delete all agents (RDEAgent CRs) associated with services in this workspace
 	services, err := dbpkg.ServiceRepo().FindByWorkspaceID(workspace.ID, 1000, 0)
