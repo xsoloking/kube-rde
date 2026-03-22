@@ -7131,10 +7131,22 @@ func createRDEAgentFromTemplate(ctx context.Context, service *models.Service, te
 		ttl = service.TTL.String
 	}
 
+	// For Karmada cross-cluster teams, agents run on a member cluster that cannot
+	// resolve the hub's internal service DNS. Use the public WebSocket URL instead.
+	effectiveServerURL := agentServerURL
+	if karmadaEnabled && team != nil && team.ClusterName != "" && team.ClusterName != "default" {
+		// Derive public WS URL from frpURL: https://x → wss://x/ws, http://x → ws://x/ws
+		if strings.HasPrefix(frpURL, "https://") {
+			effectiveServerURL = "wss://" + strings.TrimPrefix(frpURL, "https://") + "/ws"
+		} else {
+			effectiveServerURL = "ws://" + strings.TrimPrefix(frpURL, "http://") + "/ws"
+		}
+	}
+
 	// Build spec map
 	spec := map[string]interface{}{
 		"owner":             userID,
-		"serverUrl":         agentServerURL,
+		"serverUrl":         effectiveServerURL,
 		"authSecret":        agentAuthSecret,
 		"localTarget":       fmt.Sprintf("localhost:%d", containerPort),
 		"ttl":               ttl, // Use TTL from service, default to 24h

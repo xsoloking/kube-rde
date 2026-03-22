@@ -19,7 +19,7 @@ func (c *Controller) computeStatus(ctx context.Context, cr *unstructured.Unstruc
 		Details: make(map[string]interface{}),
 	}
 
-	namespace := cr.GetNamespace()
+	namespace := getDeployNamespace(cr)
 	name := cr.GetName()
 
 	// Use CR name directly as agentID since server-side already follows

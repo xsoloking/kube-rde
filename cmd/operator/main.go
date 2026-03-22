@@ -736,14 +736,21 @@ func (c *Controller) reconcileDeployment(cr *unstructured.Unstructured) error {
 		tokenURL = fmt.Sprintf("%s/realms/kuberde/protocol/openid-connect/token", baseURL)
 	}
 
+	// Only set ownerReference if Deployment and CR are in the same namespace.
+	// Cross-namespace ownerRefs cause GC to immediately delete the Deployment.
+	var deployOwnerRefs []metav1.OwnerReference
+	if namespace == cr.GetNamespace() {
+		deployOwnerRefs = []metav1.OwnerReference{
+			*metav1.NewControllerRef(cr, frpAgentGVR.GroupVersion().WithKind("RDEAgent")),
+		}
+	}
+
 	expectedDeployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        agentID, // Use agentID as Deployment Name
-			Namespace:   namespace,
-			Annotations: annotations,
-			OwnerReferences: []metav1.OwnerReference{
-				*metav1.NewControllerRef(cr, frpAgentGVR.GroupVersion().WithKind("RDEAgent")),
-			},
+			Name:            agentID, // Use agentID as Deployment Name
+			Namespace:       namespace,
+			Annotations:     annotations,
+			OwnerReferences: deployOwnerRefs,
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
@@ -898,7 +905,7 @@ func (c *Controller) checkTTL() {
 
 		if time.Since(lastActivity) > ttl {
 			name := agent.GetName()
-			namespace := agent.GetNamespace()
+			namespace := getDeployNamespace(&agent)
 
 			// Use CR name directly as agentID
 			agentID := name
@@ -1368,14 +1375,20 @@ func (c *Controller) reconcileSecrets(cr *unstructured.Unstructured, agentID str
 	// Create Secret name
 	secretName := fmt.Sprintf("%s-credentials", agentID)
 
+	// Only set ownerReference if Secret and CR are in the same namespace.
+	var secretOwnerRefs []metav1.OwnerReference
+	if namespace == cr.GetNamespace() {
+		secretOwnerRefs = []metav1.OwnerReference{
+			*metav1.NewControllerRef(cr, frpAgentGVR.GroupVersion().WithKind("RDEAgent")),
+		}
+	}
+
 	// Build Secret object
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      secretName,
-			Namespace: namespace,
-			OwnerReferences: []metav1.OwnerReference{
-				*metav1.NewControllerRef(cr, frpAgentGVR.GroupVersion().WithKind("RDEAgent")),
-			},
+			Name:            secretName,
+			Namespace:       namespace,
+			OwnerReferences: secretOwnerRefs,
 		},
 		Type: corev1.SecretTypeOpaque,
 		StringData: map[string]string{
@@ -1445,13 +1458,19 @@ func (c *Controller) reconcileStorage(cr *unstructured.Unstructured, agentID str
 
 		pvcName := fmt.Sprintf("kuberde-agent-%s-%s", agentID, name)
 
+		// Only set ownerReference if PVC and CR are in the same namespace.
+		var pvcOwnerRefs []metav1.OwnerReference
+		if namespace == cr.GetNamespace() {
+			pvcOwnerRefs = []metav1.OwnerReference{
+				*metav1.NewControllerRef(cr, frpAgentGVR.GroupVersion().WithKind("RDEAgent")),
+			}
+		}
+
 		pvc := &corev1.PersistentVolumeClaim{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      pvcName,
-				Namespace: namespace,
-				OwnerReferences: []metav1.OwnerReference{
-					*metav1.NewControllerRef(cr, frpAgentGVR.GroupVersion().WithKind("RDEAgent")),
-				},
+				Name:            pvcName,
+				Namespace:       namespace,
+				OwnerReferences: pvcOwnerRefs,
 			},
 			Spec: corev1.PersistentVolumeClaimSpec{
 				AccessModes: []corev1.PersistentVolumeAccessMode{
