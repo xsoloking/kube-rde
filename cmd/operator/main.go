@@ -1945,10 +1945,14 @@ func (c *Controller) onAddKubeRDEWorkspace(obj interface{}) {
 func (c *Controller) reconcileKubeRDEWorkspace(cr *unstructured.Unstructured) error {
 	ctx := context.Background()
 
-	workspaceID, _, _ := unstructured.NestedString(cr.Object, "spec", "workspaceID")
 	storageSize, _, _ := unstructured.NestedString(cr.Object, "spec", "storageSize")
 	storageClass, _, _ := unstructured.NestedString(cr.Object, "spec", "storageClass")
-	namespace := cr.GetNamespace()
+	// targetNamespace: where to create the PVC (team namespace).
+	// Falls back to the CR's own namespace if not set (single-cluster without teams).
+	targetNamespace, _, _ := unstructured.NestedString(cr.Object, "spec", "targetNamespace")
+	if targetNamespace == "" {
+		targetNamespace = cr.GetNamespace()
+	}
 
 	if storageSize == "" {
 		storageSize = "50Gi"
@@ -1957,12 +1961,12 @@ func (c *Controller) reconcileKubeRDEWorkspace(cr *unstructured.Unstructured) er
 		storageClass = "standard"
 	}
 
-	// Derive PVC name from workspace ID (consistent with server-side derivation)
-	pvcName := workspacePVCName(workspaceID)
+	// PVC name = CR name (Server sets CR name = workspace.PVCName, so they stay in sync).
+	pvcName := cr.GetName()
 
 	// ── Deletion path ──────────────────────────────────────────────────────
 	if !cr.GetDeletionTimestamp().IsZero() {
-		return c.cleanupKubeRDEWorkspace(ctx, cr, namespace, pvcName)
+		return c.cleanupKubeRDEWorkspace(ctx, cr, targetNamespace, pvcName)
 	}
 
 	// ── Ensure finalizer ───────────────────────────────────────────────────
@@ -1971,20 +1975,11 @@ func (c *Controller) reconcileKubeRDEWorkspace(cr *unstructured.Unstructured) er
 	}
 
 	// ── Create / ensure PVC ────────────────────────────────────────────────
-	if err := c.ensureWorkspacePVC(ctx, namespace, pvcName, storageSize, storageClass, cr); err != nil {
+	if err := c.ensureWorkspacePVC(ctx, targetNamespace, pvcName, storageSize, storageClass, cr); err != nil {
 		return c.updateKubeRDEWorkspaceStatus(ctx, cr, "Error", pvcName, err.Error())
 	}
 
 	return c.updateKubeRDEWorkspaceStatus(ctx, cr, "Ready", pvcName, "")
-}
-
-// workspacePVCName derives a deterministic PVC name from a workspace ID.
-// Must stay in sync with the server-side generateWorkspacePVCName logic.
-func workspacePVCName(workspaceID string) string {
-	if len(workspaceID) > 8 {
-		return "ws-" + workspaceID[:8] + "-pvc"
-	}
-	return "ws-" + workspaceID + "-pvc"
 }
 
 func (c *Controller) ensureWorkspacePVC(ctx context.Context, namespace, pvcName, storageSize, storageClass string, owner *unstructured.Unstructured) error {

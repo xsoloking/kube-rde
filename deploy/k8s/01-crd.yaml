@@ -336,6 +336,9 @@ spec:
                 storageClass:
                   type: string
                   description: Kubernetes StorageClass name. Defaults to "standard".
+                targetNamespace:
+                  type: string
+                  description: Namespace where the PVC is created (team namespace). Defaults to the CR's own namespace.
             status:
               type: object
               properties:

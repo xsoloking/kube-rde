@@ -2141,9 +2141,14 @@ func ensureTeamInfra(team *models.Team, quota *models.TeamQuota) error {
 }
 
 // ensureTeamCRPropagationPolicy creates (or updates) a PropagationPolicy in the
-// kuberde namespace that routes the KubeRDETeam CR to the target member cluster.
+// kuberde namespace that routes both the KubeRDETeam CR and all associated
+// KubeRDEWorkspace CRs (labelled kuberde.io/team-id) to the target member cluster.
+//
+// KubeRDEWorkspace CRs also live in kuberdeNamespace (not the team namespace),
+// so a single PropagationPolicy covers both resource types.
 func ensureTeamCRPropagationPolicy(ctx context.Context, team *models.Team) error {
 	ppName := "team-" + team.Name + "-cr"
+	teamIDStr := fmt.Sprintf("%d", team.ID)
 	policy := &unstructured.Unstructured{Object: map[string]interface{}{
 		"apiVersion": "policy.karmada.io/v1alpha1",
 		"kind":       "PropagationPolicy",
@@ -2154,10 +2159,21 @@ func ensureTeamCRPropagationPolicy(ctx context.Context, team *models.Team) error
 		},
 		"spec": map[string]interface{}{
 			"resourceSelectors": []interface{}{
+				// Route the KubeRDETeam CR
 				map[string]interface{}{
 					"apiVersion": "kuberde.io/v1beta1",
 					"kind":       "KubeRDETeam",
 					"name":       team.Name,
+				},
+				// Route all KubeRDEWorkspace CRs belonging to this team
+				map[string]interface{}{
+					"apiVersion": "kuberde.io/v1beta1",
+					"kind":       "KubeRDEWorkspace",
+					"labelSelector": map[string]interface{}{
+						"matchLabels": map[string]interface{}{
+							"kuberde.io/team-id": teamIDStr,
+						},
+					},
 				},
 			},
 			"placement": map[string]interface{}{
@@ -2165,29 +2181,51 @@ func ensureTeamCRPropagationPolicy(ctx context.Context, team *models.Team) error
 					"clusterNames": []interface{}{team.ClusterName},
 				},
 			},
-			"propagateDeps": true,
 		},
 	}}
 
-	_, err := karmadaClient.Resource(propagationPolicyGVR).Namespace(kuberdeNamespace).
-		Create(ctx, policy, metav1.CreateOptions{})
-	if err != nil && !strings.Contains(err.Error(), "already exists") {
-		return fmt.Errorf("create PropagationPolicy %s: %w", ppName, err)
+	existing, getErr := karmadaClient.Resource(propagationPolicyGVR).Namespace(kuberdeNamespace).
+		Get(ctx, ppName, metav1.GetOptions{})
+	if getErr != nil {
+		if _, createErr := karmadaClient.Resource(propagationPolicyGVR).Namespace(kuberdeNamespace).
+			Create(ctx, policy, metav1.CreateOptions{}); createErr != nil && !strings.Contains(createErr.Error(), "already exists") {
+			return fmt.Errorf("create PropagationPolicy %s: %w", ppName, createErr)
+		}
+	} else {
+		// Update spec to pick up any changes (e.g. new workspace label selectors)
+		existing.Object["spec"] = policy.Object["spec"]
+		if _, updateErr := karmadaClient.Resource(propagationPolicyGVR).Namespace(kuberdeNamespace).
+			Update(ctx, existing, metav1.UpdateOptions{}); updateErr != nil {
+			log.Printf("WARNING: Failed to update PropagationPolicy %s: %v", ppName, updateErr)
+		}
 	}
-	log.Printf("✓ PropagationPolicy %s ensures KubeRDETeam %s → cluster %s", ppName, team.Name, team.ClusterName)
+	log.Printf("✓ PropagationPolicy %s: KubeRDETeam+Workspaces %s → cluster %s", ppName, team.Name, team.ClusterName)
 	return nil
 }
 
 // ensureWorkspaceInfra creates or updates a KubeRDEWorkspace CR in the appropriate
 // API server (Karmada for member-cluster teams, hub k8s for others).
-// The Operator reconciles the CR and provisions the PVC in the target namespace/cluster.
+//
+// Design: CRs always live in kuberdeNamespace so:
+//  (a) Karmada API always has the namespace (avoids "namespace not found" errors), and
+//  (b) the team PropagationPolicy (which selects resources in kuberdeNamespace) can
+//      include these CRs with a single label-selector rule.
+//
+// The CR name = workspace.PVCName (Server-assigned); the Operator uses the CR name
+// directly as the PVC name, so Server DB and actual PVC are always in sync.
+// spec.targetNamespace tells the Operator which namespace to create the PVC in.
 func ensureWorkspaceInfra(workspace *models.Workspace, team *models.Team) error {
-	// Workspace CRs live in the team's target namespace (not kuberde ns).
+	if workspace.PVCName == "" {
+		return fmt.Errorf("ensureWorkspaceInfra: PVCName not set on workspace %s", workspace.ID)
+	}
+
+	// PVC is created by the Operator in the team's target namespace.
 	targetNamespace := kuberdeNamespace
 	if team != nil && team.Namespace != "" {
 		targetNamespace = team.Namespace
 	}
 
+	// The CR itself lives in kuberdeNamespace so the Karmada API always accepts it.
 	apiClient, err := getTeamAPIClient(team)
 	if err != nil {
 		return err
@@ -2202,37 +2240,44 @@ func ensureWorkspaceInfra(workspace *models.Workspace, team *models.Team) error 
 		storageClass = "standard"
 	}
 
+	teamID := ""
+	if team != nil {
+		teamID = fmt.Sprintf("%d", team.ID)
+	}
+
 	cr := &unstructured.Unstructured{Object: map[string]interface{}{
 		"apiVersion": "kuberde.io/v1beta1",
 		"kind":       "KubeRDEWorkspace",
 		"metadata": map[string]interface{}{
-			"name":      workspace.PVCName, // Use PVC name as CR name (unique per workspace)
-			"namespace": targetNamespace,
+			"name":      workspace.PVCName,
+			"namespace": kuberdeNamespace,
 			"labels": map[string]interface{}{
 				"kuberde.io/workspace-id": workspace.ID,
 				"kuberde.io/owner-id":     workspace.OwnerID,
+				"kuberde.io/team-id":      teamID,
 			},
 		},
 		"spec": map[string]interface{}{
-			"workspaceID":  workspace.ID,
-			"ownerID":      workspace.OwnerID,
-			"storageSize":  storageSize,
-			"storageClass": storageClass,
+			"workspaceID":     workspace.ID,
+			"ownerID":         workspace.OwnerID,
+			"storageSize":     storageSize,
+			"storageClass":    storageClass,
+			"targetNamespace": targetNamespace, // Operator creates PVC here
 		},
 	}}
 
 	ctx := context.Background()
-	existing, getErr := apiClient.Resource(kubeRDEWorkspaceGVR).Namespace(targetNamespace).
+	existing, getErr := apiClient.Resource(kubeRDEWorkspaceGVR).Namespace(kuberdeNamespace).
 		Get(ctx, workspace.PVCName, metav1.GetOptions{})
 	if getErr != nil {
-		if _, createErr := apiClient.Resource(kubeRDEWorkspaceGVR).Namespace(targetNamespace).
+		if _, createErr := apiClient.Resource(kubeRDEWorkspaceGVR).Namespace(kuberdeNamespace).
 			Create(ctx, cr, metav1.CreateOptions{}); createErr != nil {
 			return fmt.Errorf("create KubeRDEWorkspace CR for %s: %w", workspace.ID, createErr)
 		}
-		log.Printf("✓ Created KubeRDEWorkspace CR %s in namespace %s", workspace.PVCName, targetNamespace)
+		log.Printf("✓ Created KubeRDEWorkspace CR %s (targetNamespace: %s)", workspace.PVCName, targetNamespace)
 	} else {
 		existing.Object["spec"] = cr.Object["spec"]
-		if _, updateErr := apiClient.Resource(kubeRDEWorkspaceGVR).Namespace(targetNamespace).
+		if _, updateErr := apiClient.Resource(kubeRDEWorkspaceGVR).Namespace(kuberdeNamespace).
 			Update(ctx, existing, metav1.UpdateOptions{}); updateErr != nil {
 			return fmt.Errorf("update KubeRDEWorkspace CR for %s: %w", workspace.ID, updateErr)
 		}
@@ -2243,20 +2288,17 @@ func ensureWorkspaceInfra(workspace *models.Workspace, team *models.Team) error 
 
 // deleteWorkspaceCR deletes the KubeRDEWorkspace CR; the Operator's finalizer
 // cleans up the PVC and any other cluster resources.
+// CRs always live in kuberdeNamespace regardless of team.
 func deleteWorkspaceCR(workspace *models.Workspace, team *models.Team) {
 	if workspace.PVCName == "" {
 		return
-	}
-	targetNamespace := kuberdeNamespace
-	if team != nil && team.Namespace != "" {
-		targetNamespace = team.Namespace
 	}
 	apiClient, err := getTeamAPIClient(team)
 	if err != nil {
 		log.Printf("WARNING: deleteWorkspaceCR: cannot get API client for workspace %s: %v", workspace.ID, err)
 		return
 	}
-	delErr := apiClient.Resource(kubeRDEWorkspaceGVR).Namespace(targetNamespace).
+	delErr := apiClient.Resource(kubeRDEWorkspaceGVR).Namespace(kuberdeNamespace).
 		Delete(context.Background(), workspace.PVCName, metav1.DeleteOptions{})
 	if delErr != nil && !strings.Contains(delErr.Error(), "not found") {
 		log.Printf("WARNING: Failed to delete KubeRDEWorkspace CR %s: %v", workspace.PVCName, delErr)
@@ -8175,8 +8217,10 @@ func deleteWorkspaceWithResources(workspace *models.Workspace, namespace string)
 // For Karmada member-cluster teams it also cleans up resources in the Karmada API server.
 // deleteTeamNamespace removes the KubeRDETeam CR (and its Karmada PropagationPolicy if
 // applicable).  The Operator's finalizer-based cleanup handles the actual namespace,
-// ResourceQuota, auth secret, and member-cluster resources — so the Server only needs
-// to delete the single CR and the routing policy.
+// ResourceQuota, auth secret, and member-cluster resources.
+//
+// Fallback for legacy teams (created before Plan B / without a KubeRDETeam CR):
+// if the CR is not found and this is a hub-local team, the namespace is deleted directly.
 func deleteTeamNamespace(team *models.Team) error {
 	ctx := context.Background()
 	apiClient, err := getTeamAPIClient(team)
@@ -8187,10 +8231,25 @@ func deleteTeamNamespace(team *models.Team) error {
 	// Delete the KubeRDETeam CR; Operator finalizer cleans up namespace & dependents.
 	delErr := apiClient.Resource(kubeRDETeamGVR).Namespace(kuberdeNamespace).
 		Delete(ctx, team.Name, metav1.DeleteOptions{})
-	if delErr != nil && !strings.Contains(delErr.Error(), "not found") {
+	if delErr != nil && strings.Contains(delErr.Error(), "not found") {
+		// CR didn't exist — legacy team. For hub-local teams delete the namespace directly.
+		log.Printf("KubeRDETeam CR not found for team %s (legacy team) — attempting direct namespace deletion", team.Name)
+		isKarmadaTeam := karmadaEnabled && team.ClusterName != "" && team.ClusterName != "default"
+		if !isKarmadaTeam && k8sClientset != nil {
+			propagationPolicy := metav1.DeletePropagationForeground
+			if nsErr := k8sClientset.CoreV1().Namespaces().Delete(ctx, team.Namespace, metav1.DeleteOptions{
+				PropagationPolicy: &propagationPolicy,
+			}); nsErr != nil && !strings.Contains(nsErr.Error(), "not found") {
+				log.Printf("WARNING: Failed to delete legacy namespace %s: %v", team.Namespace, nsErr)
+			} else {
+				log.Printf("✓ Deleted legacy namespace %s for team %s", team.Namespace, team.Name)
+			}
+		}
+	} else if delErr != nil {
 		return fmt.Errorf("delete KubeRDETeam CR for %s: %w", team.Name, delErr)
+	} else {
+		log.Printf("✓ Deleted KubeRDETeam CR for team %s (Operator will clean up namespace %s)", team.Name, team.Namespace)
 	}
-	log.Printf("✓ Deleted KubeRDETeam CR for team %s (Operator will clean up namespace %s)", team.Name, team.Namespace)
 
 	// For Karmada teams also remove the PropagationPolicy that routes the CR.
 	if karmadaEnabled && team.ClusterName != "" && team.ClusterName != "default" && karmadaClient != nil {
@@ -8655,15 +8714,16 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Warning: Failed to create default quota for team %s: %v", team.Name, err)
 	}
 
+	// Mark as syncing BEFORE launching the goroutine so that teamInfraReconciler
+	// does not pick up this team (it only retries pending/error).
+	_ = teamRepo.UpdateInfraStatus(team.ID, "syncing")
+
 	// Async: write KubeRDETeam CR → Operator reconciles namespace/quota/secret.
-	// Returns immediately so the HTTP response is fast.
 	go func() {
 		if infraErr := ensureTeamInfra(team, teamQuota); infraErr != nil {
 			log.Printf("ERROR: ensureTeamInfra failed for team %s: %v", team.Name, infraErr)
 			_ = teamRepo.UpdateInfraStatus(team.ID, "error")
-			return
 		}
-		_ = teamRepo.UpdateInfraStatus(team.ID, "syncing")
 	}()
 
 	w.Header().Set("Content-Type", "application/json")

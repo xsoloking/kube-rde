@@ -54,7 +54,11 @@ spec:
 # Per-team PropagationPolicy template (REFERENCE — do not apply directly).
 #
 # The Server's ensureTeamCRPropagationPolicy() function creates one of these
-# automatically for each team that targets a member cluster:
+# automatically for each team that targets a member cluster.
+#
+# Key design: workspace CRs live in the kuberde namespace (NOT the team namespace)
+# and are included via a label selector, so a single PP covers both the team CR
+# and all workspace CRs for that team without relying on propagateDeps.
 #
 #   apiVersion: policy.karmada.io/v1alpha1
 #   kind: PropagationPolicy
@@ -67,12 +71,17 @@ spec:
 #     resourceSelectors:
 #     - apiVersion: kuberde.io/v1beta1
 #       kind: KubeRDETeam
-#       name: <team-name>
+#       name: <team-name>                # select the team CR by name
+#     - apiVersion: kuberde.io/v1beta1
+#       kind: KubeRDEWorkspace
+#       labelSelector:
+#         matchLabels:
+#           kuberde.io/team-id: <team-db-id>   # select ALL workspace CRs for this team
 #     placement:
 #       clusterAffinity:
 #         clusterNames:
 #         - <cluster-name>         # e.g., "oracle1"
-#     propagateDeps: true          # propagates dependent KubeRDEWorkspace CRs too
+#     # NOTE: propagateDeps is NOT set — workspace CRs are selected explicitly above
 #
 # Manual recovery: if a team's CR is stuck, re-apply its PropagationPolicy:
 #   kubectl apply -f <(cat <<EOF
@@ -86,10 +95,14 @@ spec:
 #     - apiVersion: kuberde.io/v1beta1
 #       kind: KubeRDETeam
 #       name: <team-name>
+#     - apiVersion: kuberde.io/v1beta1
+#       kind: KubeRDEWorkspace
+#       labelSelector:
+#         matchLabels:
+#           kuberde.io/team-id: <team-db-id>
 #     placement:
 #       clusterAffinity:
 #         clusterNames:
 #         - <cluster-name>
-#     propagateDeps: true
 #   EOF
 #   ) --kubeconfig=/tmp/karmada.kubeconfig

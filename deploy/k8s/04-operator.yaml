@@ -17,6 +17,14 @@ rules:
 - apiGroups: ["kuberde.io"]
   resources: ["rdeagents/status"]
   verbs: ["get", "update", "patch"]
+# 1c. Manage KubeRDETeam (CRD) — reconcile namespace/quota/secret per team
+- apiGroups: ["kuberde.io"]
+  resources: ["kuberdeteams", "kuberdeworkspaces"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# 1d. Manage KubeRDETeam and KubeRDEWorkspace status subresources
+- apiGroups: ["kuberde.io"]
+  resources: ["kuberdeteams/status", "kuberdeworkspaces/status"]
+  verbs: ["get", "update", "patch"]
 # 2. Manage Deployments (for creating agent/workload pods)
 - apiGroups: ["apps"]
   resources: ["deployments", "deployments/scale"]
@@ -37,10 +45,14 @@ rules:
 - apiGroups: [""]
   resources: ["events"]
   verbs: ["create", "patch"]
-# 7. List/watch namespaces (for multi-tenant team namespace filtering)
+# 7. Manage namespaces (create/delete team namespaces during KubeRDETeam reconciliation)
 - apiGroups: [""]
   resources: ["namespaces"]
-  verbs: ["get", "list", "watch"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# 8. Manage ResourceQuotas (apply per-team quota during KubeRDETeam reconciliation)
+- apiGroups: [""]
+  resources: ["resourcequotas"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
