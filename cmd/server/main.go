@@ -137,6 +137,20 @@ var (
 	}
 )
 
+// KubeRDE CRD GVRs for the Operator-managed resources.
+var (
+	kubeRDETeamGVR = schema.GroupVersionResource{
+		Group:   "kuberde.io",
+		Version: "v1beta1",
+		Resource: "kuberdeteams",
+	}
+	kubeRDEWorkspaceGVR = schema.GroupVersionResource{
+		Group:   "kuberde.io",
+		Version: "v1beta1",
+		Resource: "kuberdeworkspaces",
+	}
+)
+
 type contextKey string
 
 const idTokenKey contextKey = "idToken"
@@ -1994,6 +2008,174 @@ func getTeamForService(service *models.Service) *models.Team {
 		return nil
 	}
 	return getTeamForWorkspace(workspace)
+}
+
+// getAgentAuthSecretName returns the configured agent auth secret name.
+func getAgentAuthSecretName() string {
+	if n := os.Getenv("KUBERDE_AGENT_AUTH_SECRET"); n != "" {
+		return n
+	}
+	return "kuberde-agents-auth"
+}
+
+// getTeamAPIClient returns the appropriate dynamic client for creating/reading
+// KubeRDETeam CRs: karmadaClient for member-cluster teams, dynamicClient for hub-local.
+// This is the single place in the Server that distinguishes the two modes.
+func getTeamAPIClient(team *models.Team) (dynamic.Interface, error) {
+	if karmadaEnabled && team != nil && team.ClusterName != "" && team.ClusterName != "default" {
+		if karmadaClient == nil {
+			return nil, fmt.Errorf("Karmada client not initialised — cannot manage member-cluster team")
+		}
+		return karmadaClient, nil
+	}
+	if dynamicClient == nil {
+		return nil, fmt.Errorf("Kubernetes dynamic client not initialised")
+	}
+	return dynamicClient, nil
+}
+
+// buildKubeRDETeamCR constructs an unstructured KubeRDETeam CR from the DB models.
+func buildKubeRDETeamCR(team *models.Team, quota *models.TeamQuota) *unstructured.Unstructured {
+	spec := map[string]interface{}{
+		"displayName":     team.DisplayName,
+		"targetNamespace": team.Namespace,
+		"authSecretRef":   getAgentAuthSecretName(),
+	}
+	if quota != nil {
+		quotaSpec := map[string]interface{}{}
+		if quota.CPUCores > 0 {
+			quotaSpec["cpu"] = fmt.Sprintf("%d", quota.CPUCores)
+		}
+		if quota.MemoryGi > 0 {
+			quotaSpec["memory"] = fmt.Sprintf("%dGi", quota.MemoryGi)
+		}
+		if len(quota.StorageQuota) > 0 {
+			var items []models.StorageQuotaItem
+			if err := json.Unmarshal(quota.StorageQuota, &items); err == nil && len(items) > 0 {
+				storageList := make([]interface{}, 0, len(items))
+				for _, s := range items {
+					storageList = append(storageList, map[string]interface{}{
+						"name":    s.Name,
+						"limitGi": int64(s.LimitGi),
+					})
+				}
+				quotaSpec["storage"] = storageList
+			}
+		}
+		if len(quota.GPUQuota) > 0 {
+			var items []models.GPUQuotaItem
+			if err := json.Unmarshal(quota.GPUQuota, &items); err == nil && len(items) > 0 {
+				gpuList := make([]interface{}, 0, len(items))
+				for _, g := range items {
+					gpuList = append(gpuList, map[string]interface{}{
+						"name":      g.Name,
+						"modelName": g.ModelName,
+						"limit":     int64(g.Limit),
+					})
+				}
+				quotaSpec["gpu"] = gpuList
+			}
+		}
+		if len(quotaSpec) > 0 {
+			spec["quota"] = quotaSpec
+		}
+	}
+
+	return &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "kuberde.io/v1beta1",
+		"kind":       "KubeRDETeam",
+		"metadata": map[string]interface{}{
+			"name":      team.Name,
+			"namespace": kuberdeNamespace,
+			"labels": map[string]interface{}{
+				"kuberde.io/team-id": fmt.Sprintf("%d", team.ID),
+				"kuberde.io/cluster": team.ClusterName,
+			},
+		},
+		"spec": spec,
+	}}
+}
+
+// ensureTeamInfra is the single Server entry-point for creating/updating the
+// KubeRDETeam CR.  It is idempotent: if the CR already exists it updates its spec.
+//
+//   - Single-cluster: CR → dynamicClient (hub k8s) → Operator reconciles on hub.
+//   - Multi-cluster:  CR → karmadaClient (Karmada API) → PropagationPolicy →
+//     member cluster → Operator reconciles on oracle1.
+func ensureTeamInfra(team *models.Team, quota *models.TeamQuota) error {
+	apiClient, err := getTeamAPIClient(team)
+	if err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	cr := buildKubeRDETeamCR(team, quota)
+
+	existing, getErr := apiClient.Resource(kubeRDETeamGVR).Namespace(kuberdeNamespace).
+		Get(ctx, team.Name, metav1.GetOptions{})
+
+	if getErr != nil {
+		// Create
+		if _, createErr := apiClient.Resource(kubeRDETeamGVR).Namespace(kuberdeNamespace).
+			Create(ctx, cr, metav1.CreateOptions{}); createErr != nil {
+			return fmt.Errorf("create KubeRDETeam CR for %s: %w", team.Name, createErr)
+		}
+		log.Printf("✓ Created KubeRDETeam CR for team %s (cluster: %s)", team.Name, team.ClusterName)
+	} else {
+		// Update spec only, preserve status and metadata
+		existing.Object["spec"] = cr.Object["spec"]
+		if _, updateErr := apiClient.Resource(kubeRDETeamGVR).Namespace(kuberdeNamespace).
+			Update(ctx, existing, metav1.UpdateOptions{}); updateErr != nil {
+			return fmt.Errorf("update KubeRDETeam CR for %s: %w", team.Name, updateErr)
+		}
+		log.Printf("✓ Updated KubeRDETeam CR for team %s", team.Name)
+	}
+
+	// For Karmada teams: ensure the PropagationPolicy that routes the CR to the cluster.
+	if karmadaEnabled && team.ClusterName != "" && team.ClusterName != "default" {
+		if err := ensureTeamCRPropagationPolicy(ctx, team); err != nil {
+			log.Printf("WARNING: failed to ensure PropagationPolicy for KubeRDETeam %s: %v", team.Name, err)
+		}
+	}
+	return nil
+}
+
+// ensureTeamCRPropagationPolicy creates (or updates) a PropagationPolicy in the
+// kuberde namespace that routes the KubeRDETeam CR to the target member cluster.
+func ensureTeamCRPropagationPolicy(ctx context.Context, team *models.Team) error {
+	ppName := "team-" + team.Name + "-cr"
+	policy := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "policy.karmada.io/v1alpha1",
+		"kind":       "PropagationPolicy",
+		"metadata": map[string]interface{}{
+			"name":      ppName,
+			"namespace": kuberdeNamespace,
+			"labels":    map[string]interface{}{"kuberde.io/team": team.Name},
+		},
+		"spec": map[string]interface{}{
+			"resourceSelectors": []interface{}{
+				map[string]interface{}{
+					"apiVersion": "kuberde.io/v1beta1",
+					"kind":       "KubeRDETeam",
+					"name":       team.Name,
+				},
+			},
+			"placement": map[string]interface{}{
+				"clusterAffinity": map[string]interface{}{
+					"clusterNames": []interface{}{team.ClusterName},
+				},
+			},
+			"propagateDeps": true,
+		},
+	}}
+
+	_, err := karmadaClient.Resource(propagationPolicyGVR).Namespace(kuberdeNamespace).
+		Create(ctx, policy, metav1.CreateOptions{})
+	if err != nil && !strings.Contains(err.Error(), "already exists") {
+		return fmt.Errorf("create PropagationPolicy %s: %w", ppName, err)
+	}
+	log.Printf("✓ PropagationPolicy %s ensures KubeRDETeam %s → cluster %s", ppName, team.Name, team.ClusterName)
+	return nil
 }
 
 // getNamespaceForService returns the team namespace for a service, or kuberdeNamespace if no team
@@ -8117,82 +8299,32 @@ func deleteWorkspaceWithResources(workspace *models.Workspace, namespace string)
 
 // deleteTeamNamespace force deletes the Kubernetes namespace for a team.
 // For Karmada member-cluster teams it also cleans up resources in the Karmada API server.
+// deleteTeamNamespace removes the KubeRDETeam CR (and its Karmada PropagationPolicy if
+// applicable).  The Operator's finalizer-based cleanup handles the actual namespace,
+// ResourceQuota, auth secret, and member-cluster resources — so the Server only needs
+// to delete the single CR and the routing policy.
 func deleteTeamNamespace(team *models.Team) error {
-	if k8sClientset == nil {
-		return fmt.Errorf("kubernetes client not initialized")
-	}
-
 	ctx := context.Background()
-
-	isKarmadaTeam := karmadaEnabled && team.ClusterName != "" && team.ClusterName != "default"
-
-	if isKarmadaTeam {
-		// --- Karmada member-cluster team ---
-		// 1. Delete all RDEAgent CRs from Karmada API (PropagationPolicy deletion cascades)
-		if karmadaClient != nil {
-			_ = karmadaClient.Resource(frpAgentGVR).Namespace(team.Namespace).DeleteCollection(
-				ctx, metav1.DeleteOptions{}, metav1.ListOptions{},
-			)
-			// 2. Delete all PropagationPolicies in the namespace (agent + PVC)
-			_ = karmadaClient.Resource(propagationPolicyGVR).Namespace(team.Namespace).DeleteCollection(
-				ctx, metav1.DeleteOptions{}, metav1.ListOptions{},
-			)
-			// 3. Delete auth secret from Karmada API
-			authSecretName := os.Getenv("KUBERDE_AGENT_AUTH_SECRET")
-			if authSecretName == "" {
-				authSecretName = "kuberde-agents-auth"
-			}
-			secretGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
-			_ = karmadaClient.Resource(secretGVR).Namespace(team.Namespace).Delete(
-				ctx, authSecretName, metav1.DeleteOptions{},
-			)
-			// 4. Delete namespace from Karmada API
-			nsGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "namespaces"}
-			if err := karmadaClient.Resource(nsGVR).Delete(ctx, team.Namespace, metav1.DeleteOptions{}); err != nil && !strings.Contains(err.Error(), "not found") {
-				log.Printf("WARNING: Failed to delete namespace %s from Karmada API: %v", team.Namespace, err)
-			}
-			// 5. Delete ClusterPropagationPolicy for the namespace
-			clusterPropPolicyGVR := schema.GroupVersionResource{
-				Group: "policy.karmada.io", Version: "v1alpha1", Resource: "clusterpropagationpolicies",
-			}
-			_ = karmadaClient.Resource(clusterPropPolicyGVR).Delete(ctx, "team-"+team.Name+"-ns", metav1.DeleteOptions{})
-		}
-		log.Printf("Cleaned up Karmada API resources for team %s (cluster: %s)", team.Name, team.ClusterName)
-		return nil
-	}
-
-	// --- Hub-local team ---
-
-	// Check if namespace exists
-	_, err := k8sClientset.CoreV1().Namespaces().Get(ctx, team.Namespace, metav1.GetOptions{})
+	apiClient, err := getTeamAPIClient(team)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			log.Printf("Namespace %s does not exist, skipping deletion", team.Namespace)
-			return nil
-		}
-		return err
+		return fmt.Errorf("deleteTeamNamespace: %w", err)
 	}
 
-	// Delete all RDEAgents in the namespace first
-	if dynamicClient != nil {
-		err := dynamicClient.Resource(frpAgentGVR).Namespace(team.Namespace).DeleteCollection(
-			ctx, metav1.DeleteOptions{}, metav1.ListOptions{},
-		)
-		if err != nil && !strings.Contains(err.Error(), "not found") {
-			log.Printf("Warning: Failed to delete RDEAgents in namespace %s: %v", team.Namespace, err)
-		}
+	// Delete the KubeRDETeam CR; Operator finalizer cleans up namespace & dependents.
+	delErr := apiClient.Resource(kubeRDETeamGVR).Namespace(kuberdeNamespace).
+		Delete(ctx, team.Name, metav1.DeleteOptions{})
+	if delErr != nil && !strings.Contains(delErr.Error(), "not found") {
+		return fmt.Errorf("delete KubeRDETeam CR for %s: %w", team.Name, delErr)
 	}
+	log.Printf("✓ Deleted KubeRDETeam CR for team %s (Operator will clean up namespace %s)", team.Name, team.Namespace)
 
-	// Force delete namespace with propagation policy
-	propagationPolicy := metav1.DeletePropagationForeground
-	err = k8sClientset.CoreV1().Namespaces().Delete(ctx, team.Namespace, metav1.DeleteOptions{
-		PropagationPolicy: &propagationPolicy,
-	})
-	if err != nil && !strings.Contains(err.Error(), "not found") {
-		return err
+	// For Karmada teams also remove the PropagationPolicy that routes the CR.
+	if karmadaEnabled && team.ClusterName != "" && team.ClusterName != "default" && karmadaClient != nil {
+		ppName := "team-" + team.Name + "-cr"
+		_ = karmadaClient.Resource(propagationPolicyGVR).Namespace(kuberdeNamespace).
+			Delete(ctx, ppName, metav1.DeleteOptions{})
+		log.Printf("✓ Deleted PropagationPolicy %s for team %s", ppName, team.Name)
 	}
-
-	log.Printf("Initiated deletion of namespace %s for team %s", team.Namespace, team.Name)
 	return nil
 }
 
@@ -8570,9 +8702,9 @@ func handleUpdateTeamQuota(w http.ResponseWriter, r *http.Request, teamID uint) 
 		return
 	}
 
-	// Apply ResourceQuota to Kubernetes namespace
-	if err := applyTeamResourceQuotaNew(team, teamQuota); err != nil {
-		log.Printf("Warning: Failed to apply ResourceQuota for team %s: %v", team.Name, err)
+	// Update KubeRDETeam CR so Operator re-applies the ResourceQuota.
+	if err := ensureTeamInfra(team, teamQuota); err != nil {
+		log.Printf("Warning: Failed to update KubeRDETeam CR for team %s: %v", team.Name, err)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -8581,158 +8713,11 @@ func handleUpdateTeamQuota(w http.ResponseWriter, r *http.Request, teamID uint) 
 	})
 }
 
-// applyTeamResourceQuotaNew applies the team quota to Kubernetes namespace using the new model
+// applyTeamResourceQuotaNew updates the KubeRDETeam CR with the new quota so the
+// Operator can reconcile the ResourceQuota in the target namespace/cluster.
+// Kept for backward-compatibility with callers; delegates entirely to ensureTeamInfra.
 func applyTeamResourceQuotaNew(team *models.Team, quota *models.TeamQuota) error {
-	if k8sClientset == nil {
-		return fmt.Errorf("kubernetes client not initialized")
-	}
-
-	hard := corev1.ResourceList{}
-
-	// CPU
-	if quota.CPUCores > 0 {
-		hard[corev1.ResourceRequestsCPU] = resource.MustParse(fmt.Sprintf("%d", quota.CPUCores))
-		hard[corev1.ResourceLimitsCPU] = resource.MustParse(fmt.Sprintf("%d", quota.CPUCores))
-	}
-
-	// Memory
-	if quota.MemoryGi > 0 {
-		hard[corev1.ResourceRequestsMemory] = resource.MustParse(fmt.Sprintf("%dGi", quota.MemoryGi))
-		hard[corev1.ResourceLimitsMemory] = resource.MustParse(fmt.Sprintf("%dGi", quota.MemoryGi))
-	}
-
-	// Storage - sum all storage quotas
-	var storageQuotas []models.StorageQuotaItem
-	if quota.StorageQuota != nil {
-		_ = json.Unmarshal(quota.StorageQuota, &storageQuotas)
-	}
-	totalStorage := 0
-	for _, sq := range storageQuotas {
-		totalStorage += sq.LimitGi
-	}
-	if totalStorage > 0 {
-		hard[corev1.ResourceRequestsStorage] = resource.MustParse(fmt.Sprintf("%dGi", totalStorage))
-	}
-
-	// GPU - add each GPU type as extended resource
-	var gpuQuotas []models.GPUQuotaItem
-	if quota.GPUQuota != nil {
-		_ = json.Unmarshal(quota.GPUQuota, &gpuQuotas)
-	}
-	for _, gq := range gpuQuotas {
-		if gq.Limit > 0 && gq.Name != "" {
-			// GPU resources are specified as requests (e.g., "requests.nvidia.com/gpu")
-			gpuResourceName := corev1.ResourceName(fmt.Sprintf("requests.%s", gq.Name))
-			hard[gpuResourceName] = resource.MustParse(fmt.Sprintf("%d", gq.Limit))
-		}
-	}
-
-	if len(hard) == 0 {
-		return nil
-	}
-
-	// For member-cluster teams, create/update the ResourceQuota in the Karmada API
-	// server so that Karmada propagates it to the member cluster.
-	// For hub teams (default), use k8sClientset directly.
-	if karmadaEnabled && team.ClusterName != "" && team.ClusterName != "default" {
-		return applyTeamResourceQuotaKarmada(team, hard)
-	}
-
-	if k8sClientset == nil {
-		return fmt.Errorf("kubernetes client not initialized")
-	}
-	rq := &corev1.ResourceQuota{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "team-quota",
-			Namespace: team.Namespace,
-		},
-		Spec: corev1.ResourceQuotaSpec{
-			Hard: hard,
-		},
-	}
-
-	_, err := k8sClientset.CoreV1().ResourceQuotas(team.Namespace).Create(context.Background(), rq, metav1.CreateOptions{})
-	if err != nil && strings.Contains(err.Error(), "already exists") {
-		_, err = k8sClientset.CoreV1().ResourceQuotas(team.Namespace).Update(context.Background(), rq, metav1.UpdateOptions{})
-	}
-	return err
-}
-
-// applyTeamResourceQuotaKarmada creates/updates a ResourceQuota in the Karmada API
-// server and ensures a PropagationPolicy exists to push it to the team's member cluster.
-func applyTeamResourceQuotaKarmada(team *models.Team, hard corev1.ResourceList) error {
-	rqGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "resourcequotas"}
-
-	// Build the hard-limits map as strings for the Unstructured representation.
-	hardMap := make(map[string]interface{}, len(hard))
-	for k, v := range hard {
-		hardMap[string(k)] = v.String()
-	}
-
-	rqObj := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "v1",
-			"kind":       "ResourceQuota",
-			"metadata": map[string]interface{}{
-				"name":      "team-quota",
-				"namespace": team.Namespace,
-			},
-			"spec": map[string]interface{}{
-				"hard": hardMap,
-			},
-		},
-	}
-
-	_, err := karmadaClient.Resource(rqGVR).Namespace(team.Namespace).
-		Create(context.Background(), rqObj, metav1.CreateOptions{})
-	if err != nil && strings.Contains(err.Error(), "already exists") {
-		// Fetch existing, update resourceVersion, then update.
-		existing, getErr := karmadaClient.Resource(rqGVR).Namespace(team.Namespace).
-			Get(context.Background(), "team-quota", metav1.GetOptions{})
-		if getErr == nil {
-			rqObj.SetResourceVersion(existing.GetResourceVersion())
-		}
-		_, err = karmadaClient.Resource(rqGVR).Namespace(team.Namespace).
-			Update(context.Background(), rqObj, metav1.UpdateOptions{})
-	}
-	if err != nil {
-		return fmt.Errorf("upsert ResourceQuota in Karmada API: %w", err)
-	}
-
-	// Ensure a PropagationPolicy routes the ResourceQuota to the member cluster.
-	pp := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "policy.karmada.io/v1alpha1",
-			"kind":       "PropagationPolicy",
-			"metadata": map[string]interface{}{
-				"name":      "team-quota-pp",
-				"namespace": team.Namespace,
-			},
-			"spec": map[string]interface{}{
-				"resourceSelectors": []interface{}{
-					map[string]interface{}{
-						"apiVersion": "v1",
-						"kind":       "ResourceQuota",
-						"name":       "team-quota",
-					},
-				},
-				"placement": map[string]interface{}{
-					"clusterAffinity": map[string]interface{}{
-						"clusterNames": []interface{}{team.ClusterName},
-					},
-				},
-			},
-		},
-	}
-	_, ppErr := karmadaClient.Resource(propagationPolicyGVR).Namespace(team.Namespace).
-		Create(context.Background(), pp, metav1.CreateOptions{})
-	if ppErr != nil && !strings.Contains(ppErr.Error(), "already exists") {
-		log.Printf("WARNING: Failed to create PropagationPolicy for ResourceQuota: %v", ppErr)
-	}
-
-	log.Printf("✓ ResourceQuota team-quota upserted in Karmada API namespace %s → cluster %s",
-		team.Namespace, team.ClusterName)
-	return nil
+	return ensureTeamInfra(team, quota)
 }
 
 // handleListTeams returns all teams
@@ -8790,27 +8775,35 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create Kubernetes namespace
-	if err := createTeamNamespace(team); err != nil {
-		log.Printf("Warning: Failed to create namespace for team %s: %v", team.Name, err)
-	}
-
-	// Create default team quota from resource config
-	if err := createDefaultTeamQuota(team); err != nil {
+	// Persist default quota to DB synchronously so it is available immediately.
+	teamQuota, err := createDefaultTeamQuota(team)
+	if err != nil {
 		log.Printf("Warning: Failed to create default quota for team %s: %v", team.Name, err)
 	}
+
+	// Async: write KubeRDETeam CR → Operator reconciles namespace/quota/secret.
+	// Returns immediately so the HTTP response is fast.
+	go func() {
+		if infraErr := ensureTeamInfra(team, teamQuota); infraErr != nil {
+			log.Printf("ERROR: ensureTeamInfra failed for team %s: %v", team.Name, infraErr)
+			_ = teamRepo.UpdateInfraStatus(team.ID, "error")
+			return
+		}
+		_ = teamRepo.UpdateInfraStatus(team.ID, "syncing")
+	}()
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(team)
 }
 
-// createDefaultTeamQuota creates a default team quota from resource config
-func createDefaultTeamQuota(team *models.Team) error {
+// createDefaultTeamQuota creates a default team quota in DB from resource config.
+// It does NOT apply any Kubernetes resources — call ensureTeamInfra for that.
+func createDefaultTeamQuota(team *models.Team) (*models.TeamQuota, error) {
 	// Get resource config for default values
 	resourceConfig, err := resourceConfigRepo.GetConfig()
 	if err != nil {
-		return fmt.Errorf("failed to get resource config: %v", err)
+		return nil, fmt.Errorf("failed to get resource config: %v", err)
 	}
 
 	// Parse storage classes from resource config
@@ -8863,186 +8856,15 @@ func createDefaultTeamQuota(team *models.Team) error {
 	}
 
 	if err := teamQuotaRepo.Upsert(teamQuota); err != nil {
-		return fmt.Errorf("failed to create team quota: %v", err)
-	}
-
-	// Apply ResourceQuota to Kubernetes namespace
-	if err := applyTeamResourceQuotaNew(team, teamQuota); err != nil {
-		return fmt.Errorf("failed to apply resource quota: %v", err)
+		return nil, fmt.Errorf("failed to create team quota: %v", err)
 	}
 
 	log.Printf("Created default quota for team %s: CPU=%d, Memory=%dGi", team.Name, teamQuota.CPUCores, teamQuota.MemoryGi)
-	return nil
-}
-
-// createTeamNamespace creates a Kubernetes namespace for a team
-func createTeamNamespace(team *models.Team) error {
-	// Karmada member-cluster team: namespace must be created ONLY in the Karmada API
-	// server so Karmada can propagate it to the member cluster.
-	// Creating it on hub k8s first would leave an unwanted namespace on the hub
-	// and, critically, the ClusterPropagationPolicy would find the resource in hub
-	// etcd rather than Karmada etcd — so propagation would never fire.
-	if karmadaEnabled && team.ClusterName != "" && team.ClusterName != "default" {
-		if err := propagateTeamNamespaceToCluster(team); err != nil {
-			log.Printf("WARNING: Failed to propagate namespace %s to cluster %s: %v",
-				team.Namespace, team.ClusterName, err)
-		}
-		return nil
-	}
-
-	// Hub-local team: create namespace directly on hub k8s.
-	if k8sClientset == nil {
-		return fmt.Errorf("kubernetes client not initialized")
-	}
-
-	ns := &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: team.Namespace,
-			Labels: map[string]string{
-				"kuberde.io/team":      team.Name,
-				"kuberde.io/component": "team-namespace",
-			},
-		},
-	}
-
-	_, err := k8sClientset.CoreV1().Namespaces().Create(context.Background(), ns, metav1.CreateOptions{})
-	if err != nil && !strings.Contains(err.Error(), "already exists") {
-		return err
-	}
-
-	// Ensure agent auth secret is copied into the new namespace.
-	if err := copyAgentAuthSecretToNamespace(team.Namespace); err != nil {
-		log.Printf("WARNING: Failed to copy agent auth secret to team namespace: %v", err)
-	}
-	return nil
-}
-
-// propagateTeamNamespaceToCluster creates the team namespace (and auth secret) in the
-// Karmada API server and then creates a ClusterPropagationPolicy to push them to the
-// target member cluster.
-//
-// KEY DESIGN NOTE: Karmada only propagates resources that exist in its own etcd
-// (the Karmada API server). Resources created directly on the hub k8s cluster via
-// k8sClientset are invisible to Karmada — even if a ClusterPropagationPolicy selects
-// them by name, the policy will match nothing and no propagation occurs.
-// Therefore we must write every resource we want propagated into the Karmada API
-// server first, then let the ClusterPropagationPolicy distribute them.
-func propagateTeamNamespaceToCluster(team *models.Team) error {
-	policyName := "team-" + team.Name + "-ns"
-	agentAuthSecretName := os.Getenv("KUBERDE_AGENT_AUTH_SECRET")
-	if agentAuthSecretName == "" {
-		agentAuthSecretName = "kuberde-agents-auth"
-	}
-
-	nsGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "namespaces"}
-	secretGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
-
-	// Step 1: Create the namespace in the Karmada API server.
-	nsObj := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "v1",
-			"kind":       "Namespace",
-			"metadata": map[string]interface{}{
-				"name": team.Namespace,
-				"labels": map[string]interface{}{
-					"kuberde.io/team":      team.Name,
-					"kuberde.io/component": "team-namespace",
-				},
-			},
-		},
-	}
-	if _, err := karmadaClient.Resource(nsGVR).Create(context.Background(), nsObj, metav1.CreateOptions{}); err != nil &&
-		!strings.Contains(err.Error(), "already exists") {
-		return fmt.Errorf("create namespace %s in Karmada API: %w", team.Namespace, err)
-	}
-	log.Printf("✓ Created namespace %s in Karmada API server", team.Namespace)
-
-	// Step 2: Copy the agent auth secret into the Karmada API server so it can be
-	// propagated alongside the namespace.  Read the source secret from the hub cluster.
-	if k8sClientset != nil && agentAuthSecretName != "" {
-		hubSecret, err := k8sClientset.CoreV1().Secrets(kuberdeNamespace).Get(
-			context.Background(), agentAuthSecretName, metav1.GetOptions{})
-		if err == nil {
-			// Secret.Data values are []byte (decoded); re-encode to base64 strings
-			// for the Kubernetes JSON API "data" field format.
-			secretData := make(map[string]interface{}, len(hubSecret.Data))
-			for k, v := range hubSecret.Data {
-				secretData[k] = base64.StdEncoding.EncodeToString(v)
-			}
-			secretObj := &unstructured.Unstructured{
-				Object: map[string]interface{}{
-					"apiVersion": "v1",
-					"kind":       "Secret",
-					"metadata": map[string]interface{}{
-						"name":      agentAuthSecretName,
-						"namespace": team.Namespace,
-					},
-					"type": string(hubSecret.Type),
-					"data": secretData,
-				},
-			}
-			if _, serr := karmadaClient.Resource(secretGVR).Namespace(team.Namespace).
-				Create(context.Background(), secretObj, metav1.CreateOptions{}); serr != nil &&
-				!strings.Contains(serr.Error(), "already exists") {
-				log.Printf("WARNING: Failed to copy auth secret to Karmada API namespace %s: %v", team.Namespace, serr)
-			} else {
-				log.Printf("✓ Copied auth secret %s to Karmada API namespace %s", agentAuthSecretName, team.Namespace)
-			}
-		} else {
-			log.Printf("WARNING: Failed to read auth secret %s from hub namespace %s: %v", agentAuthSecretName, kuberdeNamespace, err)
-		}
-	}
-
-	// Step 3: Create ClusterPropagationPolicy to push namespace + secret to the member cluster.
-	resourceSelectors := []interface{}{
-		map[string]interface{}{
-			"apiVersion": "v1",
-			"kind":       "Namespace",
-			"name":       team.Namespace,
-		},
-	}
-	if agentAuthSecretName != "" {
-		resourceSelectors = append(resourceSelectors, map[string]interface{}{
-			"apiVersion": "v1",
-			"kind":       "Secret",
-			"name":       agentAuthSecretName,
-			"namespace":  team.Namespace,
-		})
-	}
-
-	policy := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "policy.karmada.io/v1alpha1",
-			"kind":       "ClusterPropagationPolicy",
-			"metadata": map[string]interface{}{
-				"name": policyName,
-				"labels": map[string]interface{}{
-					"kuberde.io/team": team.Name,
-				},
-			},
-			"spec": map[string]interface{}{
-				"resourceSelectors": resourceSelectors,
-				"placement": map[string]interface{}{
-					"clusterAffinity": map[string]interface{}{
-						"clusterNames": []interface{}{team.ClusterName},
-					},
-				},
-			},
-		},
-	}
-
-	if _, err := karmadaClient.Resource(clusterPropagationPolicyGVR).
-		Create(context.Background(), policy, metav1.CreateOptions{}); err != nil &&
-		!strings.Contains(err.Error(), "already exists") {
-		return fmt.Errorf("create ClusterPropagationPolicy %s: %w", policyName, err)
-	}
-	log.Printf("✓ ClusterPropagationPolicy %s created — namespace %s will be propagated to cluster %s",
-		policyName, team.Namespace, team.ClusterName)
-	return nil
+	return teamQuota, nil
 }
 
 // initAdminTeam initializes the admin team on server startup
-// Creates the team in DB, K8s namespace, ResourceQuota, and copies agent auth secret
+// Creates the team in DB and writes the KubeRDETeam CR; Operator handles k8s resources.
 func initAdminTeam() error {
 	if teamRepo == nil {
 		return fmt.Errorf("team repository not initialized")
@@ -9052,16 +8874,9 @@ func initAdminTeam() error {
 	existingTeam, err := teamRepo.GetByName("admin")
 	if err == nil && existingTeam != nil {
 		log.Printf("✓ Admin team already exists (ID: %d, Namespace: %s)", existingTeam.ID, existingTeam.Namespace)
-
-		// Ensure namespace exists
-		if k8sClientset != nil {
-			if err := createTeamNamespace(existingTeam); err != nil {
-				log.Printf("WARNING: Failed to ensure admin team namespace: %v", err)
-			}
-			// Ensure agent auth secret is copied
-			if err := copyAgentAuthSecretToNamespace(existingTeam.Namespace); err != nil {
-				log.Printf("WARNING: Failed to copy agent auth secret to admin namespace: %v", err)
-			}
+		// Idempotently reconcile the KubeRDETeam CR (Operator handles namespace/secret).
+		if infraErr := ensureTeamInfra(existingTeam, nil); infraErr != nil {
+			log.Printf("WARNING: Failed to ensure KubeRDETeam CR for admin team: %v", infraErr)
 		}
 		return nil
 	}
@@ -9082,73 +8897,22 @@ func initAdminTeam() error {
 
 	log.Printf("✓ Created admin team in DB (ID: %d)", adminTeam.ID)
 
-	// Create K8s namespace
-	if k8sClientset != nil {
-		if err := createTeamNamespace(adminTeam); err != nil {
-			log.Printf("WARNING: Failed to create admin team namespace: %v", err)
-		} else {
-			log.Printf("✓ Created namespace %s", adminTeam.Namespace)
-		}
-
-		// Copy agent auth secret to namespace
-		if err := copyAgentAuthSecretToNamespace(adminTeam.Namespace); err != nil {
-			log.Printf("WARNING: Failed to copy agent auth secret: %v", err)
-		} else {
-			log.Printf("✓ Copied agent auth secret to %s", adminTeam.Namespace)
-		}
-	}
-
-	// Create default quota
-	if err := createDefaultTeamQuota(adminTeam); err != nil {
+	// Create default quota in DB
+	adminQuota, err := createDefaultTeamQuota(adminTeam)
+	if err != nil {
 		log.Printf("WARNING: Failed to create default quota for admin team: %v", err)
 	} else {
 		log.Printf("✓ Created default quota for admin team")
 	}
 
+	// Write KubeRDETeam CR → Operator reconciles namespace, secret, ResourceQuota.
+	if infraErr := ensureTeamInfra(adminTeam, adminQuota); infraErr != nil {
+		log.Printf("WARNING: Failed to create KubeRDETeam CR for admin team: %v", infraErr)
+	} else {
+		log.Printf("✓ KubeRDETeam CR created for admin team")
+	}
+
 	log.Println("✓ Admin team initialization complete")
-	return nil
-}
-
-// copyAgentAuthSecretToNamespace copies the agent auth secret from kuberde namespace to target namespace
-func copyAgentAuthSecretToNamespace(targetNamespace string) error {
-	if k8sClientset == nil {
-		return fmt.Errorf("kubernetes client not initialized")
-	}
-
-	ctx := context.Background()
-
-	// Get the source secret
-	sourceSecret, err := k8sClientset.CoreV1().Secrets(kuberdeNamespace).Get(ctx, agentAuthSecret, metav1.GetOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to get source secret: %v", err)
-	}
-
-	// Check if secret already exists in target namespace
-	_, err = k8sClientset.CoreV1().Secrets(targetNamespace).Get(ctx, agentAuthSecret, metav1.GetOptions{})
-	if err == nil {
-		// Secret already exists
-		return nil
-	}
-
-	// Create the secret in target namespace
-	newSecret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      agentAuthSecret,
-			Namespace: targetNamespace,
-			Labels: map[string]string{
-				"kuberde.io/component":   "agent-auth",
-				"kuberde.io/copied-from": kuberdeNamespace,
-			},
-		},
-		Type: sourceSecret.Type,
-		Data: sourceSecret.Data,
-	}
-
-	_, err = k8sClientset.CoreV1().Secrets(targetNamespace).Create(ctx, newSecret, metav1.CreateOptions{})
-	if err != nil && !strings.Contains(err.Error(), "already exists") {
-		return fmt.Errorf("failed to create secret in target namespace: %v", err)
-	}
-
 	return nil
 }
 
