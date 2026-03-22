@@ -47,3 +47,4 @@ values-byai.yaml
 values-http-gpu.yaml
 
 .claude
+karmada-apiserver.config
