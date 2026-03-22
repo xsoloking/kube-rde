@@ -175,6 +175,12 @@ type Team struct {
 	Namespace   string    `gorm:"uniqueIndex;not null" json:"namespace"` // e.g., "kuberde-ai-team"
 	ClusterName string    `gorm:"not null" json:"cluster_name"` // Karmada member cluster; "default" = hub cluster local scheduling
 	Status      string    `gorm:"default:'active'" json:"status"`        // active, suspended
+	// InfraStatus tracks the lifecycle of the team's Kubernetes infrastructure (KubeRDETeam CR).
+	// pending  → CR not yet created
+	// syncing  → CR created, Operator is reconciling
+	// ready    → Operator confirmed all k8s resources provisioned
+	// error    → last provisioning attempt failed
+	InfraStatus string    `gorm:"default:'pending'" json:"infra_status"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }

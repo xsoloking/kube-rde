@@ -43,10 +43,24 @@ var frpAgentGVR = schema.GroupVersionResource{
 	Resource: "rdeagents",
 }
 
+var kubeRDETeamGVR = schema.GroupVersionResource{
+	Group:    "kuberde.io",
+	Version:  "v1beta1",
+	Resource: "kuberdeteams",
+}
+
+var kubeRDEWorkspaceGVR = schema.GroupVersionResource{
+	Group:    "kuberde.io",
+	Version:  "v1beta1",
+	Resource: "kuberdeworkspaces",
+}
+
 type Controller struct {
-	k8sClient kubernetes.Interface
-	dynClient dynamic.Interface
-	informer  cache.SharedIndexInformer
+	k8sClient   kubernetes.Interface
+	dynClient   dynamic.Interface
+	informer    cache.SharedIndexInformer
+	teamInformer cache.SharedIndexInformer
+	wsInformer  cache.SharedIndexInformer
 }
 
 func main() {
@@ -68,12 +82,16 @@ func main() {
 	}
 
 	factory := dynamicinformer.NewDynamicSharedInformerFactory(dynClient, time.Second*60)
-	informer := factory.ForResource(frpAgentGVR).Informer()
+	informer    := factory.ForResource(frpAgentGVR).Informer()
+	teamInformer := factory.ForResource(kubeRDETeamGVR).Informer()
+	wsInformer  := factory.ForResource(kubeRDEWorkspaceGVR).Informer()
 
 	controller := &Controller{
-		k8sClient: k8sClient,
-		dynClient: dynClient,
-		informer:  informer,
+		k8sClient:   k8sClient,
+		dynClient:   dynClient,
+		informer:    informer,
+		teamInformer: teamInformer,
+		wsInformer:  wsInformer,
 	}
 
 	_, err = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -85,9 +103,25 @@ func main() {
 		log.Fatalf("Error adding event handler: %v", err)
 	}
 
+	_, err = teamInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    func(obj interface{}) { controller.onAddKubeRDETeam(obj) },
+		UpdateFunc: func(_, obj interface{}) { controller.onAddKubeRDETeam(obj) },
+	})
+	if err != nil {
+		log.Fatalf("Error adding KubeRDETeam event handler: %v", err)
+	}
+
+	_, err = wsInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    func(obj interface{}) { controller.onAddKubeRDEWorkspace(obj) },
+		UpdateFunc: func(_, obj interface{}) { controller.onAddKubeRDEWorkspace(obj) },
+	})
+	if err != nil {
+		log.Fatalf("Error adding KubeRDEWorkspace event handler: %v", err)
+	}
+
 	stop := make(chan struct{})
 	go factory.Start(stop)
-	if !cache.WaitForCacheSync(stop, informer.HasSynced) {
+	if !cache.WaitForCacheSync(stop, informer.HasSynced, teamInformer.HasSynced, wsInformer.HasSynced) {
 		log.Fatalf("Failed to sync cache")
 	}
 
@@ -147,13 +181,16 @@ func handleReadyz(w http.ResponseWriter, r *http.Request, controller *Controller
 		return
 	}
 
-	// Check if informer has synced
-	if controller.informer != nil && !controller.informer.HasSynced() {
+	// Check if all informers have synced
+	informersSynced := (controller.informer == nil || controller.informer.HasSynced()) &&
+		(controller.teamInformer == nil || controller.teamInformer.HasSynced()) &&
+		(controller.wsInformer == nil || controller.wsInformer.HasSynced())
+	if !informersSynced {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		if err := json.NewEncoder(w).Encode(map[string]string{
 			"status": "not ready",
-			"reason": "informer not synced",
+			"reason": "informers not synced",
 		}); err != nil {
 			log.Printf("Failed to encode readyz response: %v", err)
 		}
@@ -1584,4 +1621,490 @@ func (c *Controller) updateAllStatusesParallel(correlationID string) {
 	log.Printf("[%s] Status update cycle completed in %v", correlationID, cycleDuration)
 
 	queue.Stop()
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// KubeRDETeam reconciler
+// Manages: Namespace, ResourceQuota, auth Secret lifecycle for a KubeRDE team.
+// Works identically in single-cluster (hub) and multi-cluster (Karmada member).
+// ──────────────────────────────────────────────────────────────────────────────
+
+const teamFinalizer = "kuberde.io/team-finalizer"
+
+func (c *Controller) onAddKubeRDETeam(obj interface{}) {
+	cr, ok := obj.(*unstructured.Unstructured)
+	if !ok {
+		return
+	}
+	log.Printf("[KubeRDETeam] Reconciling %s/%s", cr.GetNamespace(), cr.GetName())
+	if err := c.reconcileKubeRDETeam(cr); err != nil {
+		log.Printf("[KubeRDETeam] Error reconciling %s: %v", cr.GetName(), err)
+	}
+}
+
+func (c *Controller) reconcileKubeRDETeam(cr *unstructured.Unstructured) error {
+	ctx := context.Background()
+	name := cr.GetName()
+
+	targetNamespace, _, _ := unstructured.NestedString(cr.Object, "spec", "targetNamespace")
+	if targetNamespace == "" {
+		return fmt.Errorf("KubeRDETeam %s has no spec.targetNamespace", name)
+	}
+
+	// ── Deletion path ──────────────────────────────────────────────────────
+	if !cr.GetDeletionTimestamp().IsZero() {
+		return c.cleanupKubeRDETeam(ctx, cr, targetNamespace)
+	}
+
+	// ── Ensure finalizer ───────────────────────────────────────────────────
+	if err := c.ensureTeamFinalizer(ctx, cr); err != nil {
+		return err
+	}
+
+	if err := c.updateKubeRDETeamStatus(ctx, cr, "Provisioning", nil); err != nil {
+		log.Printf("[KubeRDETeam] Warning: failed to set Provisioning status: %v", err)
+	}
+
+	type condition struct {
+		condType string
+		ok       bool
+		message  string
+	}
+	var conds []condition
+
+	// Step 1: Namespace
+	if err := c.ensureTeamNamespace(ctx, targetNamespace, name); err != nil {
+		conds = append(conds, condition{"NamespaceReady", false, err.Error()})
+	} else {
+		conds = append(conds, condition{"NamespaceReady", true, ""})
+	}
+
+	// Step 2: Auth secret
+	authSecretRef, _, _ := unstructured.NestedString(cr.Object, "spec", "authSecretRef")
+	if authSecretRef == "" {
+		authSecretRef = "kuberde-agents-auth"
+	}
+	operatorNamespace := os.Getenv("OPERATOR_NAMESPACE")
+	if operatorNamespace == "" {
+		operatorNamespace = "kuberde"
+	}
+	if err := c.syncAuthSecretToNamespace(ctx, authSecretRef, operatorNamespace, targetNamespace); err != nil {
+		log.Printf("[KubeRDETeam] Warning: secret sync failed: %v", err)
+		conds = append(conds, condition{"SecretSynced", false, err.Error()})
+	} else {
+		conds = append(conds, condition{"SecretSynced", true, ""})
+	}
+
+	// Step 3: ResourceQuota
+	if quotaMap, found, _ := unstructured.NestedMap(cr.Object, "spec", "quota"); found {
+		if err := c.applyTeamResourceQuota(ctx, targetNamespace, name+"-quota", quotaMap); err != nil {
+			conds = append(conds, condition{"QuotaApplied", false, err.Error()})
+		} else {
+			conds = append(conds, condition{"QuotaApplied", true, ""})
+		}
+	}
+
+	// Compute overall phase
+	phase := "Ready"
+	for _, c := range conds {
+		if !c.ok {
+			phase = "Provisioning"
+			break
+		}
+	}
+
+	// Build conditions slice for status
+	now := time.Now().Format(time.RFC3339)
+	statusConds := make([]interface{}, 0, len(conds))
+	for _, c := range conds {
+		s := "True"
+		if !c.ok {
+			s = "False"
+		}
+		statusConds = append(statusConds, map[string]interface{}{
+			"type":               c.condType,
+			"status":             s,
+			"message":            c.message,
+			"lastTransitionTime": now,
+		})
+	}
+	return c.updateKubeRDETeamStatus(ctx, cr, phase, statusConds)
+}
+
+func (c *Controller) cleanupKubeRDETeam(ctx context.Context, cr *unstructured.Unstructured, targetNamespace string) error {
+	log.Printf("[KubeRDETeam] Deleting namespace %s for team %s", targetNamespace, cr.GetName())
+	if err := c.updateKubeRDETeamStatus(ctx, cr, "Terminating", nil); err != nil {
+		log.Printf("[KubeRDETeam] Warning: failed to set Terminating status: %v", err)
+	}
+
+	err := c.k8sClient.CoreV1().Namespaces().Delete(ctx, targetNamespace, metav1.DeleteOptions{})
+	if err != nil && !errors.IsNotFound(err) {
+		return fmt.Errorf("delete namespace %s: %w", targetNamespace, err)
+	}
+
+	// Namespace gone (or never existed) — remove finalizer so k8s can delete the CR
+	if err := c.removeTeamFinalizer(ctx, cr); err != nil {
+		return fmt.Errorf("remove finalizer from KubeRDETeam %s: %w", cr.GetName(), err)
+	}
+	log.Printf("[KubeRDETeam] Cleanup complete for team %s", cr.GetName())
+	return nil
+}
+
+// ensureTeamNamespace creates the namespace if it doesn't exist.
+func (c *Controller) ensureTeamNamespace(ctx context.Context, namespace, teamName string) error {
+	_, err := c.k8sClient.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
+	if err == nil {
+		return nil // already exists
+	}
+	if !errors.IsNotFound(err) {
+		return err
+	}
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: namespace,
+			Labels: map[string]string{
+				"kuberde.io/team":       teamName,
+				"kuberde.io/managed-by": "kuberde-operator",
+			},
+		},
+	}
+	_, createErr := c.k8sClient.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+	if createErr != nil && !errors.IsAlreadyExists(createErr) {
+		return fmt.Errorf("create namespace %s: %w", namespace, createErr)
+	}
+	log.Printf("[KubeRDETeam] ✓ Created namespace %s", namespace)
+	return nil
+}
+
+// syncAuthSecretToNamespace copies a secret from srcNamespace to dstNamespace.
+func (c *Controller) syncAuthSecretToNamespace(ctx context.Context, secretName, srcNamespace, dstNamespace string) error {
+	src, err := c.k8sClient.CoreV1().Secrets(srcNamespace).Get(ctx, secretName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("get source secret %s/%s: %w", srcNamespace, secretName, err)
+	}
+
+	dst := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      secretName,
+			Namespace: dstNamespace,
+			Labels: map[string]string{
+				"kuberde.io/managed-by": "kuberde-operator",
+				"kuberde.io/copied-from": srcNamespace,
+			},
+		},
+		Type: src.Type,
+		Data: src.Data,
+	}
+
+	existing, err := c.k8sClient.CoreV1().Secrets(dstNamespace).Get(ctx, secretName, metav1.GetOptions{})
+	if errors.IsNotFound(err) {
+		_, createErr := c.k8sClient.CoreV1().Secrets(dstNamespace).Create(ctx, dst, metav1.CreateOptions{})
+		if createErr != nil && !errors.IsAlreadyExists(createErr) {
+			return fmt.Errorf("create secret %s in %s: %w", secretName, dstNamespace, createErr)
+		}
+		log.Printf("[KubeRDETeam] ✓ Copied secret %s → %s", srcNamespace+"/"+secretName, dstNamespace)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	// Update data in case source changed
+	existing.Data = src.Data
+	if _, err := c.k8sClient.CoreV1().Secrets(dstNamespace).Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("update secret %s in %s: %w", secretName, dstNamespace, err)
+	}
+	return nil
+}
+
+// applyTeamResourceQuota creates or updates a ResourceQuota in the team namespace.
+func (c *Controller) applyTeamResourceQuota(ctx context.Context, namespace, quotaName string, quotaMap map[string]interface{}) error {
+	hard := corev1.ResourceList{}
+
+	if cpu, ok := quotaMap["cpu"].(string); ok && cpu != "" {
+		qty, err := resource.ParseQuantity(cpu)
+		if err == nil {
+			hard[corev1.ResourceLimitsCPU] = qty
+			hard[corev1.ResourceRequestsCPU] = qty
+		}
+	}
+	if mem, ok := quotaMap["memory"].(string); ok && mem != "" {
+		qty, err := resource.ParseQuantity(mem)
+		if err == nil {
+			hard[corev1.ResourceLimitsMemory] = qty
+			hard[corev1.ResourceRequestsMemory] = qty
+		}
+	}
+	if storage, ok := quotaMap["storage"].([]interface{}); ok {
+		for _, s := range storage {
+			item, _ := s.(map[string]interface{})
+			name, _ := item["name"].(string)
+			limitGi, _ := item["limitGi"].(int64)
+			if name != "" && limitGi > 0 {
+				qty, _ := resource.ParseQuantity(fmt.Sprintf("%dGi", limitGi))
+				hard[corev1.ResourceName(name+".storageclass.storage.k8s.io/requests.storage")] = qty
+			}
+		}
+	}
+
+	if len(hard) == 0 {
+		return nil // nothing to apply
+	}
+
+	desired := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      quotaName,
+			Namespace: namespace,
+			Labels:    map[string]string{"kuberde.io/managed-by": "kuberde-operator"},
+		},
+		Spec: corev1.ResourceQuotaSpec{Hard: hard},
+	}
+
+	existing, err := c.k8sClient.CoreV1().ResourceQuotas(namespace).Get(ctx, quotaName, metav1.GetOptions{})
+	if errors.IsNotFound(err) {
+		if _, createErr := c.k8sClient.CoreV1().ResourceQuotas(namespace).Create(ctx, desired, metav1.CreateOptions{}); createErr != nil {
+			return fmt.Errorf("create ResourceQuota %s: %w", quotaName, createErr)
+		}
+		log.Printf("[KubeRDETeam] ✓ Created ResourceQuota %s in %s", quotaName, namespace)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	existing.Spec = desired.Spec
+	if _, err := c.k8sClient.CoreV1().ResourceQuotas(namespace).Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("update ResourceQuota %s: %w", quotaName, err)
+	}
+	log.Printf("[KubeRDETeam] ✓ Updated ResourceQuota %s in %s", quotaName, namespace)
+	return nil
+}
+
+func (c *Controller) ensureTeamFinalizer(ctx context.Context, cr *unstructured.Unstructured) error {
+	for _, f := range cr.GetFinalizers() {
+		if f == teamFinalizer {
+			return nil
+		}
+	}
+	cr.SetFinalizers(append(cr.GetFinalizers(), teamFinalizer))
+	_, err := c.dynClient.Resource(kubeRDETeamGVR).Namespace(cr.GetNamespace()).
+		Update(ctx, cr, metav1.UpdateOptions{})
+	return err
+}
+
+func (c *Controller) removeTeamFinalizer(ctx context.Context, cr *unstructured.Unstructured) error {
+	finalizers := cr.GetFinalizers()
+	newFinalizers := finalizers[:0]
+	for _, f := range finalizers {
+		if f != teamFinalizer {
+			newFinalizers = append(newFinalizers, f)
+		}
+	}
+	cr.SetFinalizers(newFinalizers)
+	_, err := c.dynClient.Resource(kubeRDETeamGVR).Namespace(cr.GetNamespace()).
+		Update(ctx, cr, metav1.UpdateOptions{})
+	return err
+}
+
+func (c *Controller) updateKubeRDETeamStatus(ctx context.Context, cr *unstructured.Unstructured, phase string, conditions []interface{}) error {
+	latest, err := c.dynClient.Resource(kubeRDETeamGVR).Namespace(cr.GetNamespace()).
+		Get(ctx, cr.GetName(), metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	if latest.Object["status"] == nil {
+		latest.Object["status"] = map[string]interface{}{}
+	}
+	status := latest.Object["status"].(map[string]interface{})
+	status["phase"] = phase
+	status["observedGeneration"] = latest.GetGeneration()
+	if conditions != nil {
+		status["conditions"] = conditions
+	}
+	_, err = c.dynClient.Resource(kubeRDETeamGVR).Namespace(cr.GetNamespace()).
+		UpdateStatus(ctx, latest, metav1.UpdateOptions{})
+	return err
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// KubeRDEWorkspace reconciler
+// Manages: PersistentVolumeClaim lifecycle for a KubeRDE workspace.
+// ──────────────────────────────────────────────────────────────────────────────
+
+const workspaceFinalizer = "kuberde.io/workspace-finalizer"
+
+func (c *Controller) onAddKubeRDEWorkspace(obj interface{}) {
+	cr, ok := obj.(*unstructured.Unstructured)
+	if !ok {
+		return
+	}
+	log.Printf("[KubeRDEWorkspace] Reconciling %s/%s", cr.GetNamespace(), cr.GetName())
+	if err := c.reconcileKubeRDEWorkspace(cr); err != nil {
+		log.Printf("[KubeRDEWorkspace] Error reconciling %s: %v", cr.GetName(), err)
+	}
+}
+
+func (c *Controller) reconcileKubeRDEWorkspace(cr *unstructured.Unstructured) error {
+	ctx := context.Background()
+
+	workspaceID, _, _ := unstructured.NestedString(cr.Object, "spec", "workspaceID")
+	storageSize, _, _ := unstructured.NestedString(cr.Object, "spec", "storageSize")
+	storageClass, _, _ := unstructured.NestedString(cr.Object, "spec", "storageClass")
+	namespace := cr.GetNamespace()
+
+	if storageSize == "" {
+		storageSize = "50Gi"
+	}
+	if storageClass == "" {
+		storageClass = "standard"
+	}
+
+	// Derive PVC name from workspace ID (consistent with server-side derivation)
+	pvcName := workspacePVCName(workspaceID)
+
+	// ── Deletion path ──────────────────────────────────────────────────────
+	if !cr.GetDeletionTimestamp().IsZero() {
+		return c.cleanupKubeRDEWorkspace(ctx, cr, namespace, pvcName)
+	}
+
+	// ── Ensure finalizer ───────────────────────────────────────────────────
+	if err := c.ensureWorkspaceFinalizer(ctx, cr); err != nil {
+		return err
+	}
+
+	// ── Create / ensure PVC ────────────────────────────────────────────────
+	if err := c.ensureWorkspacePVC(ctx, namespace, pvcName, storageSize, storageClass, cr); err != nil {
+		return c.updateKubeRDEWorkspaceStatus(ctx, cr, "Error", pvcName, err.Error())
+	}
+
+	return c.updateKubeRDEWorkspaceStatus(ctx, cr, "Ready", pvcName, "")
+}
+
+// workspacePVCName derives a deterministic PVC name from a workspace ID.
+// Must stay in sync with the server-side generateWorkspacePVCName logic.
+func workspacePVCName(workspaceID string) string {
+	if len(workspaceID) > 8 {
+		return "ws-" + workspaceID[:8] + "-pvc"
+	}
+	return "ws-" + workspaceID + "-pvc"
+}
+
+func (c *Controller) ensureWorkspacePVC(ctx context.Context, namespace, pvcName, storageSize, storageClass string, owner *unstructured.Unstructured) error {
+	pvcsClient := c.k8sClient.CoreV1().PersistentVolumeClaims(namespace)
+
+	qty, err := resource.ParseQuantity(storageSize)
+	if err != nil {
+		return fmt.Errorf("invalid storageSize %q: %w", storageSize, err)
+	}
+
+	desired := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      pvcName,
+			Namespace: namespace,
+			Labels: map[string]string{
+				"kuberde.io/managed-by":   "kuberde-operator",
+				"kuberde.io/workspace-id": owner.GetName(),
+			},
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(owner, kubeRDEWorkspaceGVR.GroupVersion().WithKind("KubeRDEWorkspace")),
+			},
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			StorageClassName: &storageClass,
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceStorage: qty},
+			},
+		},
+	}
+
+	_, err = pvcsClient.Get(ctx, pvcName, metav1.GetOptions{})
+	if errors.IsNotFound(err) {
+		if _, createErr := pvcsClient.Create(ctx, desired, metav1.CreateOptions{}); createErr != nil && !errors.IsAlreadyExists(createErr) {
+			return fmt.Errorf("create PVC %s: %w", pvcName, createErr)
+		}
+		log.Printf("[KubeRDEWorkspace] ✓ Created PVC %s in %s", pvcName, namespace)
+		return nil
+	}
+	// PVC already exists — leave it (most fields are immutable after creation)
+	log.Printf("[KubeRDEWorkspace] PVC %s already exists in %s", pvcName, namespace)
+	return nil
+}
+
+func (c *Controller) cleanupKubeRDEWorkspace(ctx context.Context, cr *unstructured.Unstructured, namespace, pvcName string) error {
+	log.Printf("[KubeRDEWorkspace] Deleting PVC %s/%s", namespace, pvcName)
+	if err := c.updateKubeRDEWorkspaceStatus(ctx, cr, "Terminating", pvcName, ""); err != nil {
+		log.Printf("[KubeRDEWorkspace] Warning: failed to set Terminating status: %v", err)
+	}
+
+	err := c.k8sClient.CoreV1().PersistentVolumeClaims(namespace).Delete(ctx, pvcName, metav1.DeleteOptions{})
+	if err != nil && !errors.IsNotFound(err) {
+		return fmt.Errorf("delete PVC %s: %w", pvcName, err)
+	}
+
+	if err := c.removeWorkspaceFinalizer(ctx, cr); err != nil {
+		return fmt.Errorf("remove finalizer from KubeRDEWorkspace %s: %w", cr.GetName(), err)
+	}
+	log.Printf("[KubeRDEWorkspace] ✓ Cleanup complete for workspace %s", cr.GetName())
+	return nil
+}
+
+func (c *Controller) ensureWorkspaceFinalizer(ctx context.Context, cr *unstructured.Unstructured) error {
+	for _, f := range cr.GetFinalizers() {
+		if f == workspaceFinalizer {
+			return nil
+		}
+	}
+	cr.SetFinalizers(append(cr.GetFinalizers(), workspaceFinalizer))
+	_, err := c.dynClient.Resource(kubeRDEWorkspaceGVR).Namespace(cr.GetNamespace()).
+		Update(ctx, cr, metav1.UpdateOptions{})
+	return err
+}
+
+func (c *Controller) removeWorkspaceFinalizer(ctx context.Context, cr *unstructured.Unstructured) error {
+	finalizers := cr.GetFinalizers()
+	newFinalizers := finalizers[:0]
+	for _, f := range finalizers {
+		if f != workspaceFinalizer {
+			newFinalizers = append(newFinalizers, f)
+		}
+	}
+	cr.SetFinalizers(newFinalizers)
+	_, err := c.dynClient.Resource(kubeRDEWorkspaceGVR).Namespace(cr.GetNamespace()).
+		Update(ctx, cr, metav1.UpdateOptions{})
+	return err
+}
+
+func (c *Controller) updateKubeRDEWorkspaceStatus(ctx context.Context, cr *unstructured.Unstructured, phase, pvcName, message string) error {
+	latest, err := c.dynClient.Resource(kubeRDEWorkspaceGVR).Namespace(cr.GetNamespace()).
+		Get(ctx, cr.GetName(), metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	if latest.Object["status"] == nil {
+		latest.Object["status"] = map[string]interface{}{}
+	}
+	status := latest.Object["status"].(map[string]interface{})
+	status["phase"] = phase
+	if pvcName != "" {
+		status["pvcName"] = pvcName
+	}
+	if message != "" {
+		now := time.Now().Format(time.RFC3339)
+		status["conditions"] = []interface{}{map[string]interface{}{
+			"type":               "PVCReady",
+			"status":             "False",
+			"message":            message,
+			"lastTransitionTime": now,
+		}}
+	} else if phase == "Ready" {
+		now := time.Now().Format(time.RFC3339)
+		status["conditions"] = []interface{}{map[string]interface{}{
+			"type":               "PVCReady",
+			"status":             "True",
+			"message":            "",
+			"lastTransitionTime": now,
+		}}
+	}
+	_, err = c.dynClient.Resource(kubeRDEWorkspaceGVR).Namespace(cr.GetNamespace()).
+		UpdateStatus(ctx, latest, metav1.UpdateOptions{})
+	return err
 }

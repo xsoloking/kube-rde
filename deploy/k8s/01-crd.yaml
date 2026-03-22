@@ -204,4 +204,175 @@ spec:
         - name: Message
           type: string
           jsonPath: .status.message
-          priority: 1
+          priority: 1---
+# KubeRDETeam CRD — represents an organisational team and its target namespace.
+# The Operator reconciles this CR to create/delete: Namespace, ResourceQuota, auth Secret.
+# Single-cluster: CR lives in hub k8s (kuberde namespace).
+# Multi-cluster:  CR is written to Karmada API server; a PropagationPolicy pushes it to the member cluster.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: kuberdeteams.kuberde.io
+spec:
+  group: kuberde.io
+  versions:
+    - name: v1beta1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [targetNamespace]
+              properties:
+                displayName:
+                  type: string
+                  description: Human-readable team name shown in the UI.
+                targetNamespace:
+                  type: string
+                  description: Kubernetes namespace the Operator will create, e.g. "kuberde-bbc".
+                authSecretRef:
+                  type: string
+                  default: "kuberde-agents-auth"
+                  description: Name of the agent auth secret to copy from the kuberde namespace.
+                quota:
+                  type: object
+                  description: Resource quota to apply to targetNamespace.
+                  properties:
+                    cpu:
+                      type: string
+                      description: Total CPU limit, e.g. "32".
+                    memory:
+                      type: string
+                      description: Total memory limit, e.g. "64Gi".
+                    storage:
+                      type: array
+                      items:
+                        type: object
+                        required: [name, limitGi]
+                        properties:
+                          name:    { type: string }
+                          limitGi: { type: integer }
+                    gpu:
+                      type: array
+                      items:
+                        type: object
+                        required: [name, limit]
+                        properties:
+                          name:      { type: string }
+                          modelName: { type: string }
+                          limit:     { type: integer }
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                  enum: [Pending, Provisioning, Ready, Error, Terminating]
+                  description: Overall lifecycle phase of the team's infrastructure.
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required: [type, status]
+                    properties:
+                      type:               { type: string }
+                      status:             { type: string }
+                      reason:             { type: string }
+                      message:            { type: string }
+                      lastTransitionTime: { type: string }
+                observedGeneration:
+                  type: integer
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Namespace
+          type: string
+          jsonPath: .spec.targetNamespace
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+  scope: Namespaced
+  names:
+    plural:     kuberdeteams
+    singular:   kuberdeteam
+    kind:       KubeRDETeam
+    shortNames: [krt]
+---
+# KubeRDEWorkspace CRD — represents a user workspace and its persistent storage.
+# The Operator reconciles this CR to create/delete a PersistentVolumeClaim.
+# Lives in the team's targetNamespace (single-cluster: hub, multi-cluster: propagated to member).
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: kuberdeworkspaces.kuberde.io
+spec:
+  group: kuberde.io
+  versions:
+    - name: v1beta1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [workspaceID, storageSize]
+              properties:
+                workspaceID:
+                  type: string
+                  description: KubeRDE DB workspace UUID — used to derive the PVC name.
+                ownerID:
+                  type: string
+                  description: KubeRDE DB user ID that owns this workspace.
+                storageSize:
+                  type: string
+                  description: PVC capacity request, e.g. "50Gi".
+                storageClass:
+                  type: string
+                  description: Kubernetes StorageClass name. Defaults to "standard".
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                  enum: [Pending, Ready, Error, Terminating]
+                pvcName:
+                  type: string
+                  description: Name of the PVC created by the Operator.
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required: [type, status]
+                    properties:
+                      type:               { type: string }
+                      status:             { type: string }
+                      message:            { type: string }
+                      lastTransitionTime: { type: string }
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: PVC
+          type: string
+          jsonPath: .status.pvcName
+        - name: Size
+          type: string
+          jsonPath: .spec.storageSize
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+  scope: Namespaced
+  names:
+    plural:     kuberdeworkspaces
+    singular:   kuberdeworkspace
+    kind:       KubeRDEWorkspace
+    shortNames: [krw]

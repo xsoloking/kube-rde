@@ -8877,6 +8877,20 @@ func createDefaultTeamQuota(team *models.Team) error {
 
 // createTeamNamespace creates a Kubernetes namespace for a team
 func createTeamNamespace(team *models.Team) error {
+	// Karmada member-cluster team: namespace must be created ONLY in the Karmada API
+	// server so Karmada can propagate it to the member cluster.
+	// Creating it on hub k8s first would leave an unwanted namespace on the hub
+	// and, critically, the ClusterPropagationPolicy would find the resource in hub
+	// etcd rather than Karmada etcd — so propagation would never fire.
+	if karmadaEnabled && team.ClusterName != "" && team.ClusterName != "default" {
+		if err := propagateTeamNamespaceToCluster(team); err != nil {
+			log.Printf("WARNING: Failed to propagate namespace %s to cluster %s: %v",
+				team.Namespace, team.ClusterName, err)
+		}
+		return nil
+	}
+
+	// Hub-local team: create namespace directly on hub k8s.
 	if k8sClientset == nil {
 		return fmt.Errorf("kubernetes client not initialized")
 	}
@@ -8896,18 +8910,9 @@ func createTeamNamespace(team *models.Team) error {
 		return err
 	}
 
-	// Ensure agent auth secret is copied
+	// Ensure agent auth secret is copied into the new namespace.
 	if err := copyAgentAuthSecretToNamespace(team.Namespace); err != nil {
 		log.Printf("WARNING: Failed to copy agent auth secret to team namespace: %v", err)
-	}
-
-	// Karmada multi-cluster: propagate namespace and secret to member cluster
-	if karmadaEnabled && team.ClusterName != "" && team.ClusterName != "default" {
-		if err := propagateTeamNamespaceToCluster(team); err != nil {
-			log.Printf("WARNING: Failed to propagate namespace %s to cluster %s: %v",
-				team.Namespace, team.ClusterName, err)
-			// Non-fatal: namespace was created on hub; propagation failure does not block
-		}
 	}
 	return nil
 }

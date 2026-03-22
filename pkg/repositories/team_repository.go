@@ -16,6 +16,9 @@ type TeamRepository interface {
 	Delete(id uint) error
 	GetMembers(teamID uint) ([]models.User, error)
 	Count() (int64, error)
+	// InfraStatus helpers for the KubeRDETeam CR lifecycle reconciler.
+	UpdateInfraStatus(id uint, status string) error
+	FindByInfraStatuses(statuses []string) ([]models.Team, error)
 }
 
 type teamRepository struct {
@@ -91,4 +94,17 @@ func (r *teamRepository) Count() (int64, error) {
 		return 0, err
 	}
 	return count, nil
+}
+
+func (r *teamRepository) UpdateInfraStatus(id uint, status string) error {
+	return r.db.Model(&models.Team{}).Where("id = ?", id).
+		Update("infra_status", status).Error
+}
+
+func (r *teamRepository) FindByInfraStatuses(statuses []string) ([]models.Team, error) {
+	var teams []models.Team
+	if err := r.db.Where("infra_status IN ?", statuses).Find(&teams).Error; err != nil {
+		return nil, err
+	}
+	return teams, nil
 }
