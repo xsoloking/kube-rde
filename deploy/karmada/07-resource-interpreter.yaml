@@ -1,0 +1,97 @@
+# ResourceInterpreterCustomization — teach Karmada how to aggregate
+# KubeRDEWorkspace and KubeRDETeam status from member clusters back
+# to the Karmada API server.
+#
+# Without this, the Operator on the member cluster writes status to the
+# local k8s API server, but the Karmada-side CR shows empty status.
+#
+# Apply:
+#   kubectl apply -f deploy/karmada/07-resource-interpreter.yaml \
+#     --kubeconfig=/tmp/karmada.kubeconfig
+#
+# Docs: https://karmada.io/docs/userguide/globalview/customizing-resource-interpreter
+---
+# Aggregate KubeRDEWorkspace status (phase + pvcName) from member clusters.
+apiVersion: config.karmada.io/v1alpha1
+kind: ResourceInterpreterCustomization
+metadata:
+  name: kuberdeworkspace-status
+spec:
+  target:
+    apiVersion: kuberde.io/v1beta1
+    kind: KubeRDEWorkspace
+  customizations:
+    statusAggregation:
+      luaScript: >
+        function AggregateStatus(desiredObj, statusItems)
+          if statusItems == nil then
+            return desiredObj
+          end
+          -- Merge status from the first (and only) member cluster that holds this CR.
+          for i = 1, #statusItems do
+            local item = statusItems[i]
+            if item.status ~= nil then
+              desiredObj.status = item.status
+              break
+            end
+          end
+          return desiredObj
+        end
+    statusReflection:
+      luaScript: >
+        function ReflectStatus(observedObj)
+          if observedObj.status == nil then
+            return {}
+          end
+          return observedObj.status
+        end
+    healthInterpretation:
+      luaScript: >
+        function InterpretHealth(observedObj)
+          if observedObj.status == nil then
+            return false
+          end
+          return observedObj.status.phase == "Ready"
+        end
+---
+# Aggregate KubeRDETeam status (phase + conditions) from member clusters.
+apiVersion: config.karmada.io/v1alpha1
+kind: ResourceInterpreterCustomization
+metadata:
+  name: kuberdeteam-status
+spec:
+  target:
+    apiVersion: kuberde.io/v1beta1
+    kind: KubeRDETeam
+  customizations:
+    statusAggregation:
+      luaScript: >
+        function AggregateStatus(desiredObj, statusItems)
+          if statusItems == nil then
+            return desiredObj
+          end
+          for i = 1, #statusItems do
+            local item = statusItems[i]
+            if item.status ~= nil then
+              desiredObj.status = item.status
+              break
+            end
+          end
+          return desiredObj
+        end
+    statusReflection:
+      luaScript: >
+        function ReflectStatus(observedObj)
+          if observedObj.status == nil then
+            return {}
+          end
+          return observedObj.status
+        end
+    healthInterpretation:
+      luaScript: >
+        function InterpretHealth(observedObj)
+          if observedObj.status == nil then
+            return false
+          end
+          return observedObj.status.phase == "Ready"
+        end

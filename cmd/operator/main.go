@@ -1990,6 +1990,18 @@ func (c *Controller) ensureWorkspacePVC(ctx context.Context, namespace, pvcName,
 		return fmt.Errorf("invalid storageSize %q: %w", storageSize, err)
 	}
 
+	// Cross-namespace ownerReferences are invalid in Kubernetes: the GC controller
+	// looks for the owner in the PVC's namespace, not in owner.GetNamespace().
+	// When the workspace CR lives in "kuberde" but the PVC is in "kuberde-abb",
+	// GC would delete the PVC as "orphaned". Only set the ownerRef when both
+	// objects are in the same namespace (single-cluster mode without teams).
+	var ownerRefs []metav1.OwnerReference
+	if owner.GetNamespace() == namespace {
+		ownerRefs = []metav1.OwnerReference{
+			*metav1.NewControllerRef(owner, kubeRDEWorkspaceGVR.GroupVersion().WithKind("KubeRDEWorkspace")),
+		}
+	}
+
 	desired := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      pvcName,
@@ -1998,9 +2010,7 @@ func (c *Controller) ensureWorkspacePVC(ctx context.Context, namespace, pvcName,
 				"kuberde.io/managed-by":   "kuberde-operator",
 				"kuberde.io/workspace-id": owner.GetName(),
 			},
-			OwnerReferences: []metav1.OwnerReference{
-				*metav1.NewControllerRef(owner, kubeRDEWorkspaceGVR.GroupVersion().WithKind("KubeRDEWorkspace")),
-			},
+			OwnerReferences: ownerRefs,
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
@@ -2012,15 +2022,18 @@ func (c *Controller) ensureWorkspacePVC(ctx context.Context, namespace, pvcName,
 	}
 
 	_, err = pvcsClient.Get(ctx, pvcName, metav1.GetOptions{})
-	if errors.IsNotFound(err) {
-		if _, createErr := pvcsClient.Create(ctx, desired, metav1.CreateOptions{}); createErr != nil && !errors.IsAlreadyExists(createErr) {
-			return fmt.Errorf("create PVC %s: %w", pvcName, createErr)
-		}
-		log.Printf("[KubeRDEWorkspace] ✓ Created PVC %s in %s", pvcName, namespace)
+	if err == nil {
+		// PVC already exists — leave it (most fields are immutable after creation)
+		log.Printf("[KubeRDEWorkspace] PVC %s already exists in %s", pvcName, namespace)
 		return nil
 	}
-	// PVC already exists — leave it (most fields are immutable after creation)
-	log.Printf("[KubeRDEWorkspace] PVC %s already exists in %s", pvcName, namespace)
+	if !errors.IsNotFound(err) {
+		return fmt.Errorf("check PVC %s in %s: %w", pvcName, namespace, err)
+	}
+	if _, createErr := pvcsClient.Create(ctx, desired, metav1.CreateOptions{}); createErr != nil && !errors.IsAlreadyExists(createErr) {
+		return fmt.Errorf("create PVC %s: %w", pvcName, createErr)
+	}
+	log.Printf("[KubeRDEWorkspace] ✓ Created PVC %s in %s", pvcName, namespace)
 	return nil
 }
 
