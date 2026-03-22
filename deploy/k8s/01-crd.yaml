@@ -169,6 +169,9 @@ spec:
                 pvcName:
                   type: string
                   description: "Name of the PersistentVolumeClaim to use for workspace storage"
+                targetNamespace:
+                  type: string
+                  description: "Namespace where the Deployment and Secrets are created. Defaults to the CR's own namespace. Set by the Server for Karmada multi-cluster teams so the Operator deploys into the team namespace (e.g. kuberde-abb) even though the CR lives in kuberde."
                 ttl:
                   type: string
                   description: "Idle timeout duration (e.g., 8h, 30m). Set '0' to disable."

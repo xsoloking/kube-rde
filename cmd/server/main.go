@@ -7152,6 +7152,14 @@ func createRDEAgentFromTemplate(ctx context.Context, service *models.Service, te
 		"pvcName": workspace.PVCName,
 	}
 
+	// For Karmada multi-cluster teams the RDEAgent CR lives in kuberdeNamespace
+	// (propagated from Karmada API server), but the Deployment must run in the
+	// team namespace so it can access the team's PVC and ResourceQuota.
+	// spec.targetNamespace tells the Operator which namespace to deploy into.
+	if team != nil && team.Namespace != "" && team.Namespace != kuberdeNamespace {
+		spec["targetNamespace"] = team.Namespace
+	}
+
 	// Add SSH public keys if present
 	if len(sshPublicKeys) > 0 {
 		spec["sshPublicKeys"] = sshPublicKeys

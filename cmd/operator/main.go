@@ -447,10 +447,28 @@ func (c *Controller) extractSecurityContext(workloadContainer map[string]interfa
 	return nil
 }
 
+// getDeployNamespace returns the namespace where the RDEAgent's Deployment,
+// Secrets, and Storage should be created.
+//
+// For Karmada multi-cluster teams the RDEAgent CR lives in the "kuberde"
+// namespace on the member cluster (propagated from Karmada API server), but
+// the workload must run in the team namespace (e.g. "kuberde-abb") so it can
+// access the team's PVCs and ResourceQuota.  The Server sets spec.targetNamespace
+// to the team namespace for such cases.
+//
+// For single-cluster / hub-local teams spec.targetNamespace is unset, so we
+// fall back to the CR's own namespace (the team namespace already).
+func getDeployNamespace(cr *unstructured.Unstructured) string {
+	if ns, _, _ := unstructured.NestedString(cr.Object, "spec", "targetNamespace"); ns != "" {
+		return ns
+	}
+	return cr.GetNamespace()
+}
+
 func (c *Controller) reconcileDeployment(cr *unstructured.Unstructured) error {
 	spec, _, _ := unstructured.NestedMap(cr.Object, "spec")
 	name := cr.GetName()
-	namespace := cr.GetNamespace()
+	namespace := getDeployNamespace(cr)
 
 	serverUrl, _ := spec["serverUrl"].(string)
 	owner, _ := spec["owner"].(string)
@@ -1325,7 +1343,7 @@ func (c *Controller) parseSecurityContext(scMap map[string]interface{}) *corev1.
 
 // reconcileSecrets creates or updates Kubernetes Secrets for SSH public keys
 func (c *Controller) reconcileSecrets(cr *unstructured.Unstructured, agentID string) error {
-	namespace := cr.GetNamespace()
+	namespace := getDeployNamespace(cr)
 
 	// Parse SSH public keys from spec
 	var publicKeys string
@@ -1410,7 +1428,7 @@ func (c *Controller) reconcileSecrets(cr *unstructured.Unstructured, agentID str
 
 // reconcileStorage creates or updates Kubernetes PVCs for storage volumes
 func (c *Controller) reconcileStorage(cr *unstructured.Unstructured, agentID string) error {
-	namespace := cr.GetNamespace()
+	namespace := getDeployNamespace(cr)
 
 	storageList, found, _ := unstructured.NestedSlice(cr.Object, "spec", "storage")
 	if !found {
